@@ -714,6 +714,8 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
             n[0] = (((float)s[0] * oneover255) - 0.5f) * 2.0f;
             n[1] = (((float)s[1] * oneover255) - 0.5f) * 2.0f;
             n[2] = (((float)s[2] * oneover255) - 0.5f) * 2.0f;
+            n[0] *= nmapvals.scale;
+            n[1] *= nmapvals.scale;
          }
          else
          {
