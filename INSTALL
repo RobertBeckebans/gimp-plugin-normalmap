@@ -1,0 +1,22 @@
+Requirements
+=======================================
+
+The only required packages that must be installed to build the plugin
+(besides Gtk+ and the GIMP) are:
+  
+  1) gimp version 2.0.0 or later
+  2) pkg-config version 0.14 or later
+  3) gtkglext version 0.7.1 or later
+    
+For RedHat and Mandrake Linux distributions, you'll need to have the 'devel'
+RPMs installed for Gtk+, Glib and GIMP.
+  
+Installation
+=======================================
+
+1. Type 'make' to build the plugin
+2. Type 'make install' to install the plugin. By default the plugin will be
+installed in your GIMP user plugin directory ($HOME/.gimp-2.2/plug-ins).  If
+you want to install the plugin system-wide, as root you must manually copy the
+plugin to the system GIMP plugin directory.
+
