@@ -8,7 +8,7 @@ LDFLAGS=
 
 TARGET=normalmap
 
-OBJS=gimpoldpreview.o normalmap.o preview3d.o
+OBJS=normalmap.o preview3d.o
 
 LIBS=`$(GIMPTOOL) --libs` `pkg-config --libs gtkglext-1.0`
 

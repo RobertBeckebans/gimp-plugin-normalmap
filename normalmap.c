@@ -28,8 +28,9 @@
 #include <libgimp/gimp.h>
 #include <libgimp/gimpui.h>
 
-#include "gimpoldpreview.h"
 #include "preview3d.h"
+
+#define PREVIEW_SIZE 128
 
 enum FILTER_TYPE
 {
@@ -87,7 +88,7 @@ static const float oneover255 = 1.0f / 255.0f;
 gint runme = 0;
 
 static GtkWidget *dialog;
-static GimpOldPreview *preview;
+static GtkWidget *preview;
 
 MAIN()
 	
@@ -150,7 +151,6 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
 				gimp_drawable_detach(drawable);
 				return;
 			}
-         gimp_old_preview_free(preview);
 		   break;
 		case GIMP_RUN_NONINTERACTIVE:
 		   if(nparams != 5)
@@ -316,7 +316,7 @@ static int sample_alpha_map(unsigned char *pixels, int x, int y,
 static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
 {
 	gint x, y;
-	gint width, height, bpp, rowbytes, amap_w = 0, amap_h = 0;
+	gint width, height, bpp, rowbytes, pw, ph, amap_w = 0, amap_h = 0;
 	guchar *d, *dst, *s, *src, *tmp, *amap = 0;
    float *heights;
 	float val, du, dv, n[3], weight;
@@ -811,16 +811,16 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
    {
       update_3D_preview(width, height, bpp, dst);
       
-      tmp = g_malloc(preview->width * preview->height * bpp);
-      scale_image(tmp, preview->width, preview->height, dst, width, height, bpp);
-      width = preview->width;
-      height = preview->height;
-      rowbytes = preview->width * bpp;
+      pw = GIMP_PREVIEW_AREA(preview)->width;
+      ph = GIMP_PREVIEW_AREA(preview)->height;
+      rowbytes = pw * bpp;
       
-      for(y = 0; y < height; ++y)
-         gimp_old_preview_do_row(preview, y, width, tmp + (y * rowbytes));
+      tmp = g_malloc(pw * ph * bpp);
+      scale_image(tmp, pw, ph, dst, width, height, bpp);
       
-      gtk_widget_queue_draw(preview->widget);
+      gimp_preview_area_draw(GIMP_PREVIEW_AREA(preview), 0, 0, pw, ph,
+                             (bpp == 4) ? GIMP_RGBA_IMAGE : GIMP_RGB_IMAGE,
+                             tmp, rowbytes);
       
       g_free(tmp);
       
@@ -906,7 +906,7 @@ static void height_source_selected(GtkWidget *widget, gpointer data)
    else
    {
       nmapvals.conversion = CONVERT_NONE;
-      menu=gtk_option_menu_get_menu(GTK_OPTION_MENU(opt));
+      menu = gtk_option_menu_get_menu(GTK_OPTION_MENU(opt));
       gtk_menu_set_active(GTK_MENU(menu), nmapvals.conversion);
       gtk_widget_set_sensitive(opt, 0);
    }
@@ -1007,8 +1007,7 @@ static void normalmap_dialog_response(GtkWidget *widget, gint response_id,
 
 static gint normalmap_dialog(GimpDrawable *drawable)
 {
-   GtkWidget *hbox;
-   GtkWidget *vbox;
+   GtkWidget *hbox, *vbox, *abox;
    GtkWidget *btn;
    GtkWidget *table;
    GtkWidget *opt, *alpha_result_opt;
@@ -1017,6 +1016,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    GtkWidget *label;
    GtkObject *adj;
    GtkWidget *spin;
+   GtkWidget *frame;
    int num_amaps = 0;
    
    if(nmapvals.alpha == 4)
@@ -1053,10 +1053,25 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_box_pack_start(GTK_BOX(hbox), vbox, 1, 1, 0);
    gtk_widget_show(vbox);
    
-   preview = gimp_old_preview_new(drawable, 1);
-   gtk_box_pack_start(GTK_BOX(vbox), preview->frame, 0, 0, 0);
-   gtk_widget_show(preview->widget);
-   normalmap(drawable, TRUE);
+   frame = gtk_frame_new("Preview");
+   gtk_box_pack_start(GTK_BOX(vbox), frame, 0, 0, 0);
+   gtk_widget_show(frame);
+   
+   abox = gtk_alignment_new(0.5, 0.5, 0.0, 0.0);
+   gtk_container_set_border_width(GTK_CONTAINER (abox), 4);
+   gtk_container_add(GTK_CONTAINER(frame), abox);
+   gtk_widget_show(abox);
+
+   frame = gtk_frame_new(NULL);
+   gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_IN);
+   gtk_container_add(GTK_CONTAINER(abox), frame);
+   gtk_widget_show(frame);
+   
+   preview = gimp_preview_area_new();
+   gimp_preview_area_set_max_size(GIMP_PREVIEW_AREA(preview), PREVIEW_SIZE, PREVIEW_SIZE);
+   gtk_drawing_area_size(GTK_DRAWING_AREA(preview), PREVIEW_SIZE, PREVIEW_SIZE);
+   gtk_container_add(GTK_CONTAINER(frame), preview);
+   gtk_widget_show(preview);
    
    btn = gtk_button_new_with_label("3D Preview");
    gtk_signal_connect(GTK_OBJECT(btn), "clicked",
@@ -1435,7 +1450,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    
 	gtk_widget_show(dialog);
 
-   update_preview = 0;
+   update_preview = 1;
    gtk_timeout_add(100, idle_callback, drawable);
 	
    runme = 0;
