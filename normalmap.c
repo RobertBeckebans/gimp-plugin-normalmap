@@ -34,8 +34,8 @@
 
 enum FILTER_TYPE
 {
-   FILTER_NONE = 0, FILTER_SOBEL, FILTER_PREWITT, FILTER_3x3, FILTER_5x5,
-   FILTER_7x7, FILTER_9x9,
+   FILTER_NONE = 0, FILTER_SOBEL, FILTER_SOBEL_5x5, FILTER_PREWITT,
+   FILTER_PREWITT_5x5, FILTER_3x3, FILTER_5x5, FILTER_7x7, FILTER_9x9,
    MAX_FILTER_TYPE
 };
 
@@ -99,7 +99,7 @@ static void query(void)
 		{GIMP_PDB_INT32, "run_mode", "Interactive, non-interactive"},
 		{GIMP_PDB_IMAGE, "image", "Input image (unused)"},
 		{GIMP_PDB_DRAWABLE, "drawable", "Input drawable"},
-		{GIMP_PDB_INT32, "filter", "Filter type (0 = 4 sample, 1 = sobel, 2-6 = 3x3,5x5,7x7,9x9)"},
+		{GIMP_PDB_INT32, "filter", "Filter type (0 = 4 sample, 1 = sobel, 2 = sobel 5x5, 3 = prewitt, 4-7 = 3x3,5x5,7x7,9x9)"},
       {GIMP_PDB_FLOAT, "scale", "Scale (>0)"},
       {GIMP_PDB_INT32, "wrap", "Wrap (0 = no)"},
       {GIMP_PDB_INT32, "height_source", "Height source (0 = average RGB, 1 = alpha channel)"},
@@ -411,6 +411,54 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
          kernel_dv[5].x =  1; kernel_dv[5].y = -1; kernel_dv[5].w = -1.0f;
          
          break;
+      case FILTER_SOBEL_5x5:
+         num_elements = 20;
+         kernel_du = (kernel_element*)g_malloc(20 * sizeof(kernel_element));
+         kernel_dv = (kernel_element*)g_malloc(20 * sizeof(kernel_element));
+
+         kernel_du[ 0].x = -2; kernel_du[ 0].y =  2; kernel_du[ 0].w =  -1.0f;
+         kernel_du[ 1].x = -2; kernel_du[ 1].y =  1; kernel_du[ 1].w =  -4.0f;
+         kernel_du[ 2].x = -2; kernel_du[ 2].y =  0; kernel_du[ 2].w =  -6.0f;
+         kernel_du[ 3].x = -2; kernel_du[ 3].y = -1; kernel_du[ 3].w =  -4.0f;
+         kernel_du[ 4].x = -2; kernel_du[ 4].y = -2; kernel_du[ 4].w =  -1.0f;
+         kernel_du[ 5].x = -1; kernel_du[ 5].y =  2; kernel_du[ 5].w =  -2.0f;
+         kernel_du[ 6].x = -1; kernel_du[ 6].y =  1; kernel_du[ 6].w =  -8.0f;
+         kernel_du[ 7].x = -1; kernel_du[ 7].y =  0; kernel_du[ 7].w = -12.0f;
+         kernel_du[ 8].x = -1; kernel_du[ 8].y = -1; kernel_du[ 8].w =  -8.0f;
+         kernel_du[ 9].x = -1; kernel_du[ 9].y = -2; kernel_du[ 9].w =  -2.0f;
+         kernel_du[10].x =  1; kernel_du[10].y =  2; kernel_du[10].w =   2.0f;
+         kernel_du[11].x =  1; kernel_du[11].y =  1; kernel_du[11].w =   8.0f;
+         kernel_du[12].x =  1; kernel_du[12].y =  0; kernel_du[12].w =  12.0f;
+         kernel_du[13].x =  1; kernel_du[13].y = -1; kernel_du[13].w =   8.0f;
+         kernel_du[14].x =  1; kernel_du[14].y = -2; kernel_du[14].w =   2.0f;
+         kernel_du[15].x =  2; kernel_du[15].y =  2; kernel_du[15].w =   1.0f;
+         kernel_du[16].x =  2; kernel_du[16].y =  1; kernel_du[16].w =   4.0f;
+         kernel_du[17].x =  2; kernel_du[17].y =  0; kernel_du[17].w =   6.0f;
+         kernel_du[18].x =  2; kernel_du[18].y = -1; kernel_du[18].w =   4.0f;
+         kernel_du[19].x =  2; kernel_du[19].y = -2; kernel_du[19].w =   1.0f;
+      
+         kernel_dv[ 0].x = -2; kernel_dv[ 0].y =  2; kernel_dv[ 0].w =   1.0f;
+         kernel_dv[ 1].x = -1; kernel_dv[ 1].y =  2; kernel_dv[ 1].w =   4.0f;
+         kernel_dv[ 2].x =  0; kernel_dv[ 2].y =  2; kernel_dv[ 2].w =   6.0f;
+         kernel_dv[ 3].x =  1; kernel_dv[ 3].y =  2; kernel_dv[ 3].w =   4.0f;
+         kernel_dv[ 4].x =  2; kernel_dv[ 4].y =  2; kernel_dv[ 4].w =   1.0f;
+         kernel_dv[ 5].x = -2; kernel_dv[ 5].y =  1; kernel_dv[ 5].w =   2.0f;
+         kernel_dv[ 6].x = -1; kernel_dv[ 6].y =  1; kernel_dv[ 6].w =   8.0f;
+         kernel_dv[ 7].x =  0; kernel_dv[ 7].y =  1; kernel_dv[ 7].w =  12.0f;
+         kernel_dv[ 8].x =  1; kernel_dv[ 8].y =  1; kernel_dv[ 8].w =   8.0f;
+         kernel_dv[ 9].x =  2; kernel_dv[ 9].y =  1; kernel_dv[ 9].w =   2.0f;
+         kernel_dv[10].x = -2; kernel_dv[10].y = -1; kernel_dv[10].w =  -2.0f;
+         kernel_dv[11].x = -1; kernel_dv[11].y = -1; kernel_dv[11].w =  -8.0f;
+         kernel_dv[12].x =  0; kernel_dv[12].y = -1; kernel_dv[12].w = -12.0f;
+         kernel_dv[13].x =  1; kernel_dv[13].y = -1; kernel_dv[13].w =  -8.0f;
+         kernel_dv[14].x =  2; kernel_dv[14].y = -1; kernel_dv[14].w =  -2.0f;
+         kernel_dv[15].x = -2; kernel_dv[15].y = -2; kernel_dv[15].w =  -1.0f;
+         kernel_dv[16].x = -1; kernel_dv[16].y = -2; kernel_dv[16].w =  -4.0f;
+         kernel_dv[17].x =  0; kernel_dv[17].y = -2; kernel_dv[17].w =  -6.0f;
+         kernel_dv[18].x =  1; kernel_dv[18].y = -2; kernel_dv[18].w =  -4.0f;
+         kernel_dv[19].x =  2; kernel_dv[19].y = -2; kernel_dv[19].w =  -1.0f;
+      
+         break;
       case FILTER_PREWITT:
          num_elements = 6;
          kernel_du = (kernel_element*)g_malloc(6 * sizeof(kernel_element));
@@ -431,6 +479,54 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
          kernel_dv[5].x =  1; kernel_dv[5].y = -1; kernel_dv[5].w = -1.0f;
          
          break;      
+      case FILTER_PREWITT_5x5:
+         num_elements = 20;
+         kernel_du = (kernel_element*)g_malloc(20 * sizeof(kernel_element));
+         kernel_dv = (kernel_element*)g_malloc(20 * sizeof(kernel_element));
+
+         kernel_du[ 0].x = -2; kernel_du[ 0].y =  2; kernel_du[ 0].w = -1.0f;
+         kernel_du[ 1].x = -2; kernel_du[ 1].y =  1; kernel_du[ 1].w = -1.0f;
+         kernel_du[ 2].x = -2; kernel_du[ 2].y =  0; kernel_du[ 2].w = -1.0f;
+         kernel_du[ 3].x = -2; kernel_du[ 3].y = -1; kernel_du[ 3].w = -1.0f;
+         kernel_du[ 4].x = -2; kernel_du[ 4].y = -2; kernel_du[ 4].w = -1.0f;
+         kernel_du[ 5].x = -1; kernel_du[ 5].y =  2; kernel_du[ 5].w = -2.0f;
+         kernel_du[ 6].x = -1; kernel_du[ 6].y =  1; kernel_du[ 6].w = -2.0f;
+         kernel_du[ 7].x = -1; kernel_du[ 7].y =  0; kernel_du[ 7].w = -2.0f;
+         kernel_du[ 8].x = -1; kernel_du[ 8].y = -1; kernel_du[ 8].w = -2.0f;
+         kernel_du[ 9].x = -1; kernel_du[ 9].y = -2; kernel_du[ 9].w = -2.0f;
+         kernel_du[10].x =  1; kernel_du[10].y =  2; kernel_du[10].w =  2.0f;
+         kernel_du[11].x =  1; kernel_du[11].y =  1; kernel_du[11].w =  2.0f;
+         kernel_du[12].x =  1; kernel_du[12].y =  0; kernel_du[12].w =  2.0f;
+         kernel_du[13].x =  1; kernel_du[13].y = -1; kernel_du[13].w =  2.0f;
+         kernel_du[14].x =  1; kernel_du[14].y = -2; kernel_du[14].w =  2.0f;
+         kernel_du[15].x =  2; kernel_du[15].y =  2; kernel_du[15].w =  1.0f;
+         kernel_du[16].x =  2; kernel_du[16].y =  1; kernel_du[16].w =  1.0f;
+         kernel_du[17].x =  2; kernel_du[17].y =  0; kernel_du[17].w =  1.0f;
+         kernel_du[18].x =  2; kernel_du[18].y = -1; kernel_du[18].w =  1.0f;
+         kernel_du[19].x =  2; kernel_du[19].y = -2; kernel_du[19].w =  1.0f;
+      
+         kernel_dv[ 0].x = -2; kernel_dv[ 0].y =  2; kernel_dv[ 0].w =  1.0f;
+         kernel_dv[ 1].x = -1; kernel_dv[ 1].y =  2; kernel_dv[ 1].w =  1.0f;
+         kernel_dv[ 2].x =  0; kernel_dv[ 2].y =  2; kernel_dv[ 2].w =  1.0f;
+         kernel_dv[ 3].x =  1; kernel_dv[ 3].y =  2; kernel_dv[ 3].w =  1.0f;
+         kernel_dv[ 4].x =  2; kernel_dv[ 4].y =  2; kernel_dv[ 4].w =  1.0f;
+         kernel_dv[ 5].x = -2; kernel_dv[ 5].y =  1; kernel_dv[ 5].w =  2.0f;
+         kernel_dv[ 6].x = -1; kernel_dv[ 6].y =  1; kernel_dv[ 6].w =  2.0f;
+         kernel_dv[ 7].x =  0; kernel_dv[ 7].y =  1; kernel_dv[ 7].w =  2.0f;
+         kernel_dv[ 8].x =  1; kernel_dv[ 8].y =  1; kernel_dv[ 8].w =  2.0f;
+         kernel_dv[ 9].x =  2; kernel_dv[ 9].y =  1; kernel_dv[ 9].w =  2.0f;
+         kernel_dv[10].x = -2; kernel_dv[10].y = -1; kernel_dv[10].w = -2.0f;
+         kernel_dv[11].x = -1; kernel_dv[11].y = -1; kernel_dv[11].w = -2.0f;
+         kernel_dv[12].x =  0; kernel_dv[12].y = -1; kernel_dv[12].w = -2.0f;
+         kernel_dv[13].x =  1; kernel_dv[13].y = -1; kernel_dv[13].w = -2.0f;
+         kernel_dv[14].x =  2; kernel_dv[14].y = -1; kernel_dv[14].w = -2.0f;
+         kernel_dv[15].x = -2; kernel_dv[15].y = -2; kernel_dv[15].w = -1.0f;
+         kernel_dv[16].x = -1; kernel_dv[16].y = -2; kernel_dv[16].w = -1.0f;
+         kernel_dv[17].x =  0; kernel_dv[17].y = -2; kernel_dv[17].w = -1.0f;
+         kernel_dv[18].x =  1; kernel_dv[18].y = -2; kernel_dv[18].w = -1.0f;
+         kernel_dv[19].x =  2; kernel_dv[19].y = -2; kernel_dv[19].w = -1.0f;
+      
+         break;
       case FILTER_3x3:
          num_elements = 6;
          kernel_du = (kernel_element*)g_malloc(6 * sizeof(kernel_element));
@@ -1131,10 +1227,22 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 							 (gpointer)FILTER_SOBEL);
 	gtk_widget_show(menuitem);
 	gtk_menu_append(GTK_MENU(menu), menuitem);
+	menuitem = gtk_menu_item_new_with_label("Sobel 5x5");
+	gtk_signal_connect(GTK_OBJECT(menuitem), "activate",
+							 GTK_SIGNAL_FUNC(filter_type_selected),
+							 (gpointer)FILTER_SOBEL_5x5);
+	gtk_widget_show(menuitem);
+	gtk_menu_append(GTK_MENU(menu), menuitem);
 	menuitem = gtk_menu_item_new_with_label("Prewitt");
 	gtk_signal_connect(GTK_OBJECT(menuitem), "activate",
 							 GTK_SIGNAL_FUNC(filter_type_selected),
 							 (gpointer)FILTER_PREWITT);
+	gtk_widget_show(menuitem);
+	gtk_menu_append(GTK_MENU(menu), menuitem);
+	menuitem = gtk_menu_item_new_with_label("Prewitt 5x5");
+	gtk_signal_connect(GTK_OBJECT(menuitem), "activate",
+							 GTK_SIGNAL_FUNC(filter_type_selected),
+							 (gpointer)FILTER_PREWITT_5x5);
 	gtk_widget_show(menuitem);
 	gtk_menu_append(GTK_MENU(menu), menuitem);
 	menuitem = gtk_menu_item_new_with_label("3x3");
