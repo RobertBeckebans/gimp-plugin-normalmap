@@ -2,15 +2,25 @@
 GIMPTOOL=gimptool-2.0
 
 CC=gcc
-CFLAGS=-O3 -Wall `$(GIMPTOOL) --cflags` `pkg-config --cflags gtkglext-1.0`
+CFLAGS=-O3 -Wall `pkg-config --cflags gtk+-2.0 gtkglext-1.0 gimp-2.0`
 LD=gcc
 LDFLAGS=
+
+ifdef WIN32
+CFLAGS+=-DWIN32
+LDFLAGS+=-mwindows
+endif
 
 TARGET=normalmap
 
 OBJS=normalmap.o preview3d.o
 
-LIBS=`$(GIMPTOOL) --libs` `pkg-config --libs gtkglext-1.0`
+LIBS=`pkg-config --libs gtk+-2.0 gtkglext-1.0 gimp-2.0 gimpui-2.0`
+ifdef WIN32
+LIBS+=-lglew32
+else
+LIBS+=-L/usr/X11R6/lib -lGLEW
+endif
 
 all: $(TARGET)
 

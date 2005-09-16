@@ -18,16 +18,12 @@
 	the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 	Boston, MA 02111-1307, USA.
 */
-#define GL_GLEXT_PROTOTYPES
 
 #include <string.h>
 #include <math.h>
 #include <gtk/gtk.h>
 #include <gtk/gtkgl.h>
-#include <GL/gl.h>
-#include <GL/glu.h>
-#include <GL/glut.h>
-#include <GL/glext.h>
+#include <GL/glew.h>
 #include <libgimp/gimp.h>
 #include <libgimp/gimpui.h>
 
@@ -54,11 +50,6 @@ static int my;
 static float rot[3];
 static float zoom;
 
-#ifdef _WIN32
-PFNGLACTIVETEXTUREARBPROC glActiveTexture = 0;
-PFNGLMULTITEXCOORD2FARBPROC glMultiTexCoord2f = 0;
-#endif
-
 #define M(r,c) m[(c << 2) + r]
 #define T(r,c) t[(c << 2) + r]
 
@@ -66,26 +57,26 @@ static void mat_invert(float *m)
 {
    float invdet;
    float t[16];
-   
+
    invdet = (float)1.0 / (M(0, 0) * (M(1, 1) * M(2, 2) - M(1, 2) * M(2, 1)) -
                           M(0, 1) * (M(1, 0) * M(2, 2) - M(1, 2) * M(2, 0)) +
                           M(0, 2) * (M(1, 0) * M(2, 1) - M(1, 1) * M(2, 0)));
-   
+
    T(0,0) =  invdet * (M(1, 1) * M(2, 2) - M(1, 2) * M(2, 1));
    T(0,1) = -invdet * (M(0, 1) * M(2, 2) - M(0, 2) * M(2, 1));
    T(0,2) =  invdet * (M(0, 1) * M(1, 2) - M(0, 2) * M(1, 1));
    T(0,3) = 0;
-   
+
    T(1,0) = -invdet * (M(1, 0) * M(2, 2) - M(1, 2) * M(2, 0));
    T(1,1) =  invdet * (M(0, 0) * M(2, 2) - M(0, 2) * M(2, 0));
    T(1,2) = -invdet * (M(0, 0) * M(1, 2) - M(0, 2) * M(1, 0));
    T(1,3) = 0;
-   
+
    T(2,0) =  invdet * (M(1, 0) * M(2, 1) - M(1, 1) * M(2, 0));
    T(2,1) = -invdet * (M(0, 0) * M(2, 1) - M(0, 1) * M(2, 0));
    T(2,2) =  invdet * (M(0, 0) * M(1, 1) - M(0, 1) * M(1, 0));
    T(2,3) = 0;
-   
+
    T(3,0) = -(M(3, 0) * T(0, 0) + M(3, 1) * T(1, 0) + M(3, 2) * T(2, 0));
    T(3,1) = -(M(3, 0) * T(0, 1) + M(3, 1) * T(1, 1) + M(3, 2) * T(2, 1));
    T(3,2) = -(M(3, 0) * T(0, 2) + M(3, 1) * T(1, 2) + M(3, 2) * T(2, 2));
@@ -121,72 +112,63 @@ static void mat_mult_vec(float *v, float *m)
 
 static void init(GtkWidget *widget, gpointer data)
 {
+   int err;
    GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
    GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
-   const char *ext_string;
-   
+
    if(!gdk_gl_drawable_gl_begin(gldrawable, glcontext))
       return;
-   
+      
+   err = glewInit();
+   if(err != GLEW_OK)
+   {
+      g_message(glewGetErrorString(err));
+      _gl_error = 1;
+   }
+
    glClearColor(0, 0, 0.35f, 0);
    glDepthFunc(GL_LEQUAL);
    glEnable(GL_DEPTH_TEST);
-   
+
    glLineWidth(3);
    glEnable(GL_LINE_SMOOTH);
-   
+
    _gl_error = 0;
-   
-   ext_string = (const char*)glGetString(GL_EXTENSIONS);
-   
-   if(!strstr(ext_string, "GL_ARB_multitexture"))
+
+   if(!GLEW_ARB_multitexture)
    {
       g_message("GL_ARB_multitexture is required for the 3D preview");
       _gl_error = 1;
    }
-   
-   if(!strstr(ext_string, "GL_ARB_texture_env_combine"))
+
+   if(!GLEW_ARB_texture_env_combine)
    {
       g_message("GL_ARB_texture_env_combine is required for the 3D preview");
       _gl_error = 1;
    }
 
-   if(!strstr(ext_string, "GL_ARB_texture_env_dot3"))
+   if(!GLEW_ARB_texture_env_dot3)
    {
       g_message("GL_ARB_texture_env_dot3 is required for the 3D preview");
       _gl_error = 1;
    }
 
-   if(!strstr(ext_string, "GL_SGIS_generate_mipmap"))
+   if(!GLEW_SGIS_generate_mipmap)
    {
       g_message("GL_SGIS_generate_mipmap is required for the 3D preview");
       _gl_error = 1;
    }
-   
-#ifdef _WIN32
-   glActiveTexture = (PFNGLACTIVETEXTUREARBPROC)
-      wglGetProcAddress("glActiveTextureARB");
-   glMultiTexCoord2f = (PFNGLMULTITEXCOORD2FARBPROC)
-      wglGetProcAddress("glMultiTexCoord2fARB");
-   
-   if((glActiveTexture == 0) ||
-      (glMultiTexCoord2f == 0))
-   {
-      g_message("ARB_multitexture extension initialization failed!");
-      _gl_error = 1;
-   }
-#endif
-   
+
    if(_gl_error) return;
-   
-   glActiveTexture(GL_TEXTURE0_ARB);
+
+   glActiveTexture(GL_TEXTURE0);
    glEnable(GL_TEXTURE_2D);
    glGenTextures(1, &baseID);
    glGenTextures(1, &bumpID);
-   
+
    rot[0] = rot[1] = rot[2] = 0;
    zoom = 3;
-   
+
    gdk_gl_drawable_gl_end(gldrawable);
 }
 
@@ -236,24 +218,24 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    else
       l[0] = l[1] = l[2] = 0;
       
-   glActiveTexture(GL_TEXTURE0_ARB);
-   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_ARB);
-   glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB_ARB, GL_DOT3_RGB_ARB);
-   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB_ARB, GL_PRIMARY_COLOR_ARB);
-   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB_ARB, GL_SRC_COLOR);
-   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB_ARB, GL_TEXTURE);
-   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB_ARB, GL_SRC_COLOR);
+   glActiveTexture(GL_TEXTURE0);
+   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+   glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_DOT3_RGB);
+   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PRIMARY_COLOR);
+   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
+   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE);
+   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
 
-   glActiveTexture(GL_TEXTURE1_ARB);
+   glActiveTexture(GL_TEXTURE1);
    if(basemap)
    {
       glEnable(GL_TEXTURE_2D);
-      glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_ARB);
-      glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB_ARB, GL_MODULATE);
-      glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB_ARB, GL_PREVIOUS_ARB);
-      glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB_ARB, GL_SRC_COLOR);
-      glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB_ARB, GL_TEXTURE);
-      glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB_ARB, GL_SRC_COLOR);
+      glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+      glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
+      glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PREVIOUS);
+      glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
+      glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE);
+      glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
    }
    else
       glDisable(GL_TEXTURE_2D);
@@ -268,53 +250,53 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    {
       glNormal3f(0, 0, 1);
       
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, 0,          0);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, 0,          0);
+      glMultiTexCoord2f(GL_TEXTURE0, 0,          0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0,          0);
       glVertex3f(-1, 1, 0.001f);
-      
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, 0,     bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, 0,     base_t);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0,     bump_t);
+      glMultiTexCoord2f(GL_TEXTURE1, 0,     base_t);
       glVertex3f(-1, -1, 0.001f);
-      
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, bump_s, bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, base_s, base_t);
+
+      glMultiTexCoord2f(GL_TEXTURE0, bump_s, bump_t);
+      glMultiTexCoord2f(GL_TEXTURE1, base_s, base_t);
       glVertex3f(1, -1, 0.001f);
-      
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, bump_s,     0);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, base_s,     0);
+
+      glMultiTexCoord2f(GL_TEXTURE0, bump_s,     0);
+      glMultiTexCoord2f(GL_TEXTURE1, base_s,     0);
       glVertex3f(1, 1, 0.001f);
    }
    glEnd();
-   
+
    c[2] = (-l[2] * 0.5f) + 0.5f;
-      
+
    glColor3fv(c);
-   
+
    glBegin(GL_QUADS);
    {
       glNormal3f(0, 0, -1);
-      
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, 0,           0);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, 0,           0);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0,           0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0,           0);
       glVertex3f(-1,  1, -0.001f);
-      
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, 0,      bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, 0,      base_t);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0,      bump_t);
+      glMultiTexCoord2f(GL_TEXTURE1, 0,      base_t);
       glVertex3f(-1, -1, -0.001f);
-      
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, bump_s, bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, base_s, base_t);
+
+      glMultiTexCoord2f(GL_TEXTURE0, bump_s, bump_t);
+      glMultiTexCoord2f(GL_TEXTURE1, base_s, base_t);
       glVertex3f( 1, -1, -0.001f);
-      
-      glMultiTexCoord2f(GL_TEXTURE0_ARB, bump_s,      0);
-      glMultiTexCoord2f(GL_TEXTURE1_ARB, base_s,      0);
+
+      glMultiTexCoord2f(GL_TEXTURE0, bump_s,      0);
+      glMultiTexCoord2f(GL_TEXTURE1, base_s,      0);
       glVertex3f( 1,  1, -0.001f);
    }
    glEnd();
    
-   glActiveTexture(GL_TEXTURE1_ARB);
+   glActiveTexture(GL_TEXTURE1);
    glDisable(GL_TEXTURE_2D);
-   glActiveTexture(GL_TEXTURE0_ARB);
+   glActiveTexture(GL_TEXTURE0);
    glDisable(GL_TEXTURE_2D);
    
    glColor4f(1, 1, 1, 1);
@@ -382,7 +364,7 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
    
    if(event->is_hint)
    {
-#ifndef _WIN32
+#ifndef WIN32
       gdk_window_get_pointer(event->window, &x, &y, &state);
 #endif
    }
@@ -488,7 +470,7 @@ static void basemap_callback(gint32 id, gpointer data)
       }
    }
    
-   if((w_pot == w)&&(h_pot == h))
+   if((w_pot == w) && (h_pot == h))
       pixels = src;
    else
    {
@@ -506,7 +488,7 @@ static void basemap_callback(gint32 id, gpointer data)
       }
    }
 
-   glActiveTexture(GL_TEXTURE1_ARB);
+   glActiveTexture(GL_TEXTURE1);
    glBindTexture(GL_TEXTURE_2D, baseID);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -516,8 +498,8 @@ static void basemap_callback(gint32 id, gpointer data)
    glTexImage2D(GL_TEXTURE_2D, 0, bpp, w_pot, h_pot, 0,
                 (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, pixels);
    
-   base_s=(float)w / (float)w_pot;
-   base_t=(float)h / (float)h_pot;
+   base_s = (float)w / (float)w_pot;
+   base_t = (float)h / (float)h_pot;
    
    if(pixels != src)
       g_free(pixels);
@@ -656,7 +638,7 @@ void update_3D_preview(unsigned int w, unsigned int h, int bpp,
       }
    }
 
-   glActiveTexture(GL_TEXTURE0_ARB);
+   glActiveTexture(GL_TEXTURE0);
    glBindTexture(GL_TEXTURE_2D, bumpID);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
