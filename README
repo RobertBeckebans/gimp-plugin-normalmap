@@ -21,6 +21,7 @@ unchanged, have the height used to generate the normal written to it, be
 replaced by either 0 or 1, or the value of a grayscale image.
 * Dynamic 2D preview in the interactive dialog.
 * Dynamic 3D preview window with the normalmap applied to a lit primitive
+* Parallax bump mapping for 3D preview
     
 Planned features
 ==========================================    

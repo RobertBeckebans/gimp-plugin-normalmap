@@ -42,8 +42,8 @@ enum FILTER_TYPE
 enum CONVERSION_TYPE
 {
    CONVERT_NONE = 0, CONVERT_BIASED_RGB, CONVERT_RED, CONVERT_GREEN, 
-   CONVERT_BLUE, CONVERT_MAX_RGB, CONVERT_COLORSPACE, CONVERT_NORMALIZE_ONLY,
-   MAX_CONVERSION_TYPE
+   CONVERT_BLUE, CONVERT_MAX_RGB, CONVERT_MIN_RGB, CONVERT_COLORSPACE,
+   CONVERT_NORMALIZE_ONLY, MAX_CONVERSION_TYPE
 };
 
 enum DUDV_TYPE
@@ -762,6 +762,9 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
                   case CONVERT_MAX_RGB:
                      val = (float)max(s[0], max(s[1], s[2]));
                      break;
+                  case CONVERT_MIN_RGB:
+                     val = (float)min(s[0], min(s[1], s[2]));
+                     break;
                   case CONVERT_COLORSPACE:
                      val = (1.0f - ((1.0f - ((float)s[0] / 255.0f)) *
                                     (1.0f - ((float)s[1] / 255.0f)) *
@@ -1470,6 +1473,12 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
                       GTK_SIGNAL_FUNC(conversion_selected), 
                       (gpointer)CONVERT_MAX_RGB);
+   gtk_widget_show(menuitem);
+   gtk_menu_append(GTK_MENU(menu), menuitem);
+   menuitem = gtk_menu_item_new_with_label("Min RGB");
+   gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+                      GTK_SIGNAL_FUNC(conversion_selected), 
+                      (gpointer)CONVERT_MIN_RGB);
    gtk_widget_show(menuitem);
    gtk_menu_append(GTK_MENU(menu), menuitem);
    menuitem = gtk_menu_item_new_with_label("Colorspace");

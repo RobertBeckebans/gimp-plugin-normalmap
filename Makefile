@@ -2,7 +2,7 @@
 GIMPTOOL=gimptool-2.0
 
 CC=gcc
-CFLAGS=-O3 -Wall `pkg-config --cflags gtk+-2.0 gtkglext-1.0 gimp-2.0`
+CFLAGS=-g -O3 -Wall `pkg-config --cflags gtk+-2.0 gtkglext-1.0 gimp-2.0`
 LD=gcc
 LDFLAGS=
 

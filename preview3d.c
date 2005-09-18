@@ -29,19 +29,89 @@
 
 static int _active = 0;
 static int _gl_error = 0;
-static gint32 bumpmap_drawable_id = -1;
+static gint32 normalmap_drawable_id = -1;
 static GtkWidget *window = 0;
 static GtkWidget *glarea = 0;
+static GtkWidget *parallax_check = 0;
+static GtkWidget *specular_check = 0;
 
-static GLuint baseID = 0;
-static GLuint bumpID = 0;
+static GLuint diffuse_tex = 0;
+static GLuint normal_tex = 0;
+static GLuint white_tex = 0;
 
-static int basemap = 0;
+static const float anisotropy = 4.0f;
 
-static float bump_s = 1;
-static float bump_t = 1;
-static float base_s = 1;
-static float base_t = 1;
+static int has_glsl = 0;
+static GLhandleARB parallax_prog = 0;
+static const char *parallax_vert_source =
+   "varying vec2 tex0;\n"
+   "varying vec2 tex1;\n"
+   "varying vec3 eyeVec;\n"
+   "varying vec3 lightVec;\n"
+   
+   "uniform vec3 eyePos;\n"
+   "uniform vec3 lightDir;\n\n"
+   
+   "void main()\n"
+   "{\n"
+   "   gl_Position = ftransform();\n"
+   "   tex0 = gl_MultiTexCoord0.xy;\n"
+   "   tex1 = gl_MultiTexCoord1.xy;\n"
+   "   mat3 TBN;\n"
+   "   TBN[0] = gl_MultiTexCoord2.xyz * gl_NormalMatrix;\n"
+   "   TBN[1] = gl_MultiTexCoord3.xyz * gl_NormalMatrix;\n"
+   "   TBN[2] = gl_Normal * gl_NormalMatrix;\n"
+   "   lightVec = lightDir * TBN;\n"
+   "   eyeVec = (eyePos - gl_Vertex.xyz) * TBN;\n"
+   "}\n";
+static const char *parallax_frag_source =
+   "varying vec2 tex0;\n"
+   "varying vec2 tex1;\n"
+   "varying vec3 eyeVec;\n"
+   "varying vec3 lightVec;\n"
+   
+   "uniform sampler2D sNormal;\n\n"
+   "uniform sampler2D sDiffuse;\n"
+   
+   "uniform bool parallax;\n"
+   "uniform bool specular;\n"
+   "uniform float specular_exp;\n\n"
+   
+   "void main()\n"
+   "{\n"
+   "   vec3 V = normalize(eyeVec);\n"
+   "   vec3 L = normalize(lightVec);\n"
+   "   vec2 offset0 = tex0;\n"
+   "   vec2 offset1 = tex1;\n"
+   "   if(parallax)\n"
+   "   {\n"
+   "      float height = texture2D(sNormal, tex0).a;\n"
+   "      height = height * 0.04 - 0.02;\n"
+   "      offset0 -= (V.xy * height);\n"
+   "      offset1 -= (V.xy * height);\n"
+   "   }\n"
+   "   vec3 N = normalize(texture2D(sNormal, offset0).rgb * 2.0 - 1.0);\n"
+   "   vec4 diffuse = texture2D(sDiffuse, offset1);\n"
+   "   float NdotL = clamp(dot(N, L), 0.0, 1.0);\n"
+   "   vec4 color = diffuse * NdotL;\n"
+   "   if(specular)\n"
+   "   {\n"
+   "      vec3 R = reflect(V, N);\n"
+   "      float RdotL = clamp(dot(R, L), 0.0, 1.0);\n"
+   "      color += pow(RdotL, specular_exp);\n"
+   "   }\n"
+   "   gl_FragColor = color;\n"
+   "}\n";
+
+static int parallax = 0;
+static int specular = 0;
+
+static float specular_exp = 32.0f;
+
+static float normal_s = 1;
+static float normal_t = 1;
+static float diffuse_s = 1;
+static float diffuse_t = 1;
 
 static float light_dir[3] = {0, 0, 1};
 
@@ -113,6 +183,10 @@ static void mat_mult_vec(float *v, float *m)
 static void init(GtkWidget *widget, gpointer data)
 {
    int err;
+   unsigned char white[16] = {0xff, 0xff, 0xff, 0xff,
+                              0xff, 0xff, 0xff, 0xff,
+                              0xff, 0xff, 0xff, 0xff,
+                              0xff, 0xff, 0xff, 0xff};
    GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
    GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
 
@@ -158,13 +232,108 @@ static void init(GtkWidget *widget, gpointer data)
       g_message("GL_SGIS_generate_mipmap is required for the 3D preview");
       _gl_error = 1;
    }
-
+   
    if(_gl_error) return;
+
+   glGenTextures(1, &diffuse_tex);
+   glGenTextures(1, &normal_tex);
+   glGenTextures(1, &white_tex);
 
    glActiveTexture(GL_TEXTURE0);
    glEnable(GL_TEXTURE_2D);
-   glGenTextures(1, &baseID);
-   glGenTextures(1, &bumpID);
+   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+   glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_DOT3_RGB);
+   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PRIMARY_COLOR);
+   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
+   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE);
+   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
+
+   glActiveTexture(GL_TEXTURE1);
+   glEnable(GL_TEXTURE_2D);
+   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+   glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
+   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PREVIOUS);
+   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
+   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE);
+   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
+   
+   glBindTexture(GL_TEXTURE_2D, white_tex);
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 4, 4, 0,
+                GL_LUMINANCE, GL_UNSIGNED_BYTE, white);
+   
+   has_glsl = GLEW_ARB_shader_objects && GLEW_ARB_vertex_shader && 
+      GLEW_ARB_fragment_shader;
+   
+   if(has_glsl)
+   {
+      GLhandleARB shader;
+      int res, len, loc;
+      char *info;
+      
+      parallax_prog = glCreateProgramObjectARB();
+      
+      shader = glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB);
+      glShaderSourceARB(shader, 1, &parallax_vert_source, 0);
+      glCompileShaderARB(shader);
+      glGetObjectParameterivARB(shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+      if(res)
+         glAttachObjectARB(parallax_prog, shader);
+      else
+      {
+         glGetObjectParameterivARB(shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(shader, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
+      glDeleteObjectARB(shader);
+      
+      shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+      glShaderSourceARB(shader, 1, &parallax_frag_source, 0);
+      glCompileShaderARB(shader);
+      glGetObjectParameterivARB(shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+      if(res)
+         glAttachObjectARB(parallax_prog, shader);
+      else
+      {
+         glGetObjectParameterivARB(shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(shader, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
+      glDeleteObjectARB(shader);
+      
+      glLinkProgramARB(parallax_prog);
+      glGetObjectParameterivARB(parallax_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+
+      if(!res)
+      {
+         glGetObjectParameterivARB(parallax_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(shader, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
+      
+      glUseProgramObjectARB(parallax_prog);
+      loc = glGetUniformLocationARB(parallax_prog, "sNormal");
+      glUniform1iARB(loc, 0);
+      loc = glGetUniformLocationARB(parallax_prog, "sDiffuse");
+      glUniform1iARB(loc, 1);
+      loc = glGetUniformLocationARB(parallax_prog, "lightDir");
+      glUniform3fARB(loc, 0, 0, 1);
+      glUseProgramObjectARB(0);
+   }
+   else
+   {
+      gtk_widget_set_sensitive(parallax_check, 0);
+      gtk_widget_set_sensitive(specular_check, 0);
+   }
 
    rot[0] = rot[1] = rot[2] = 0;
    zoom = 3;
@@ -174,10 +343,11 @@ static void init(GtkWidget *widget, gpointer data)
 
 static gint expose(GtkWidget *widget, GdkEventExpose *event)
 {
-   GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
-   GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
    float m[16];
    float l[3], c[3], mag;
+   int loc;
+   GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
+   GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
    
    if(event->count > 0) return(1);
    
@@ -217,80 +387,76 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    }
    else
       l[0] = l[1] = l[2] = 0;
-      
-   glActiveTexture(GL_TEXTURE0);
-   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
-   glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_DOT3_RGB);
-   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PRIMARY_COLOR);
-   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
-   glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE);
-   glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
-
-   glActiveTexture(GL_TEXTURE1);
-   if(basemap)
-   {
-      glEnable(GL_TEXTURE_2D);
-      glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
-      glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
-      glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PREVIOUS);
-      glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, GL_SRC_COLOR);
-      glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE);
-      glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, GL_SRC_COLOR);
-   }
-   else
-      glDisable(GL_TEXTURE_2D);
 
    c[0] = (-l[0] * 0.5f) + 0.5f;
    c[1] = (l[1] * 0.5f) + 0.5f;
    c[2] = (l[2] * 0.5f) + 0.5f;
    
    glColor3fv(c);
-
-   glBegin(GL_QUADS);
+   
+   if((parallax || specular) && has_glsl)
    {
+      glUseProgramObjectARB(parallax_prog);
+      loc = glGetUniformLocationARB(parallax_prog, "eyePos");
+      glUniform3fARB(loc, 0, 0, -zoom);
+      loc = glGetUniformLocationARB(parallax_prog, "parallax");
+      glUniform1iARB(loc, parallax);
+      loc = glGetUniformLocationARB(parallax_prog, "specular");
+      glUniform1iARB(loc, specular);
+      loc = glGetUniformLocationARB(parallax_prog, "specular_exp");
+      glUniform1fARB(loc, specular_exp);
+   }
+
+   glBegin(GL_TRIANGLE_STRIP);
+   {
+      glMultiTexCoord3f(GL_TEXTURE2, -1, 0, 0);
+      glMultiTexCoord3f(GL_TEXTURE3, 0, 1, 0);
       glNormal3f(0, 0, 1);
       
-      glMultiTexCoord2f(GL_TEXTURE0, 0,          0);
-      glMultiTexCoord2f(GL_TEXTURE1, 0,          0);
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glVertex3f(-1, 1, 0.001f);
 
-      glMultiTexCoord2f(GL_TEXTURE0, 0,     bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1, 0,     base_t);
+      glMultiTexCoord2f(GL_TEXTURE0, 0, normal_t);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, diffuse_t);
       glVertex3f(-1, -1, 0.001f);
 
-      glMultiTexCoord2f(GL_TEXTURE0, bump_s, bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1, base_s, base_t);
-      glVertex3f(1, -1, 0.001f);
-
-      glMultiTexCoord2f(GL_TEXTURE0, bump_s,     0);
-      glMultiTexCoord2f(GL_TEXTURE1, base_s,     0);
+      glMultiTexCoord2f(GL_TEXTURE0, normal_s, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, diffuse_s, 0);
       glVertex3f(1, 1, 0.001f);
+
+      glMultiTexCoord2f(GL_TEXTURE0, normal_s, normal_t);
+      glMultiTexCoord2f(GL_TEXTURE1, diffuse_s, diffuse_t);
+      glVertex3f(1, -1, 0.001f);
    }
    glEnd();
 
+   c[1] = (-l[1] * 0.5f) + 0.5f;
    c[2] = (-l[2] * 0.5f) + 0.5f;
 
    glColor3fv(c);
 
-   glBegin(GL_QUADS);
+   glBegin(GL_TRIANGLE_STRIP);
    {
+      glMultiTexCoord3f(GL_TEXTURE2, -1, 0, 0);
+      glMultiTexCoord3f(GL_TEXTURE3, 0, -1, 0);
       glNormal3f(0, 0, -1);
 
-      glMultiTexCoord2f(GL_TEXTURE0, 0,           0);
-      glMultiTexCoord2f(GL_TEXTURE1, 0,           0);
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glVertex3f(-1,  1, -0.001f);
 
-      glMultiTexCoord2f(GL_TEXTURE0, 0,      bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1, 0,      base_t);
+      glMultiTexCoord2f(GL_TEXTURE0, 0, normal_t);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, diffuse_t);
       glVertex3f(-1, -1, -0.001f);
 
-      glMultiTexCoord2f(GL_TEXTURE0, bump_s, bump_t);
-      glMultiTexCoord2f(GL_TEXTURE1, base_s, base_t);
-      glVertex3f( 1, -1, -0.001f);
-
-      glMultiTexCoord2f(GL_TEXTURE0, bump_s,      0);
-      glMultiTexCoord2f(GL_TEXTURE1, base_s,      0);
+      glMultiTexCoord2f(GL_TEXTURE0, normal_s, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, diffuse_s, 0);
       glVertex3f( 1,  1, -0.001f);
+
+      glMultiTexCoord2f(GL_TEXTURE0, normal_s, normal_t);
+      glMultiTexCoord2f(GL_TEXTURE1, diffuse_s, diffuse_t);
+      glVertex3f( 1, -1, -0.001f);
    }
    glEnd();
    
@@ -298,6 +464,9 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    glDisable(GL_TEXTURE_2D);
    glActiveTexture(GL_TEXTURE0);
    glDisable(GL_TEXTURE_2D);
+   
+   if((parallax || specular) && has_glsl)
+      glUseProgramObjectARB(0);
    
    glColor4f(1, 1, 1, 1);
    glBegin(GL_LINE_LOOP);
@@ -309,6 +478,9 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    }
    glEnd();
    
+   glActiveTexture(GL_TEXTURE1);
+   glEnable(GL_TEXTURE_2D);
+   glActiveTexture(GL_TEXTURE0);
    glEnable(GL_TEXTURE_2D);
    
    gdk_gl_drawable_swap_buffers(gldrawable);
@@ -338,7 +510,7 @@ static gint configure(GtkWidget *widget, GdkEventConfigure *event)
       
    glMatrixMode(GL_PROJECTION);
    glLoadIdentity();
-   gluPerspective(60, (float)w / (float)h, 0.5f, 100);
+   gluPerspective(60, (float)w / (float)h, 0.1f, 100);
       
    glMatrixMode(GL_MODELVIEW);
    glLoadIdentity();
@@ -359,7 +531,6 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
 {
    int x, y;
    float dx, dy;
-   GdkRectangle area;
    GdkModifierType state;
    
    if(event->is_hint)
@@ -374,11 +545,6 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
       y = event->y;
       state = event->state;
    }
-   
-   area.x = 0;
-   area.y = 0;
-   area.width = widget->allocation.width;
-   area.height = widget->allocation.height;
 
    dx = -0.25f * (float)(mx - x);
    dy = -0.25f * (float)(my - y);
@@ -386,7 +552,7 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
    if(state & GDK_BUTTON1_MASK)
    {
       rot[1] += cosf(rot[0] / 180.0f * M_PI) * dx;
-      rot[2] -= sinf(rot[0] / 180.0f * M_PI) * dx;
+      //rot[2] -= sinf(rot[0] / 180.0f * M_PI) * dx;
       rot[0] += dy;
    }
    else if(state & GDK_BUTTON3_MASK)
@@ -396,8 +562,8 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
    
    mx = x;
    my = y;
-
-   gtk_widget_draw(widget, &area);
+   
+   gtk_widget_queue_draw(widget);
    
    return(1);
 }
@@ -415,7 +581,7 @@ static gint dialog_constrain(gint32 image_id, gint32 drawable_id,
    return(gimp_drawable_is_rgb(drawable_id));
 }
 
-static void basemap_callback(gint32 id, gpointer data)
+static void diffusemap_callback(gint32 id, gpointer data)
 {
    GimpDrawable *drawable;
    int x, y, n, w, h, bpp;
@@ -423,19 +589,17 @@ static void basemap_callback(gint32 id, gpointer data)
    unsigned char *src, *pixels;
    unsigned char *s, *d;
    GimpPixelRgn src_rgn;
-   GdkRectangle area;
    
    if(_gl_error) return;
    
-   area.x = 0;
-   area.y = 0;
-   area.width = glarea->allocation.width;
-   area.height = glarea->allocation.height;
-   
-   if(id == bumpmap_drawable_id)
+   if(id == normalmap_drawable_id)
    {
-      basemap = 0;
-      gtk_widget_draw(glarea, &area);
+      if(white_tex != 0)
+      {
+         glActiveTexture(GL_TEXTURE1);
+         glBindTexture(GL_TEXTURE_2D, white_tex);
+      }
+      gtk_widget_queue_draw(glarea);
       return;
    }
    
@@ -489,40 +653,49 @@ static void basemap_callback(gint32 id, gpointer data)
    }
 
    glActiveTexture(GL_TEXTURE1);
-   glBindTexture(GL_TEXTURE_2D, baseID);
+   glBindTexture(GL_TEXTURE_2D, diffuse_tex);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+   glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, bpp, w_pot, h_pot, 0,
                 (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, pixels);
    
-   base_s = (float)w / (float)w_pot;
-   base_t = (float)h / (float)h_pot;
+   diffuse_s = (float)w / (float)w_pot;
+   diffuse_t = (float)h / (float)h_pot;
    
    if(pixels != src)
       g_free(pixels);
    g_free(src);
    
-   basemap = 1;
-   
    gimp_drawable_detach(drawable);
    
-   gtk_widget_draw(glarea, &area);
+   gtk_widget_queue_draw(glarea);
+}
+
+static void toggle_clicked(GtkWidget *widget, gpointer data)
+{
+   *((int*)data) = !(*((int*)data));
+   gtk_widget_queue_draw(glarea);
 }
 
 void show_3D_preview(GimpDrawable *drawable)
 {
-   GtkWidget *vbox;
+   GtkWidget *vbox, *vbox2;
    GtkWidget *table;
    GtkWidget *opt;
    GtkWidget *menu;
+   GtkWidget *check;
    GdkGLConfig *glconfig;
+   
+   parallax = 0;
+   specular = 0;
    
    if(_active) return;
    
-   bumpmap_drawable_id = drawable->drawable_id;
+   normalmap_drawable_id = drawable->drawable_id;
    
    glconfig = gdk_gl_config_new_by_mode(GDK_GL_MODE_RGBA |
                                         GDK_GL_MODE_DEPTH |
@@ -563,8 +736,7 @@ void show_3D_preview(GimpDrawable *drawable)
    
    gtk_widget_set_usize(glarea, 400, 400);
    
-   gtk_box_pack_start(GTK_BOX(vbox),glarea, 1, 1, 0);
-   gtk_widget_show(glarea);
+   gtk_box_pack_start(GTK_BOX(vbox), glarea, 1, 1, 0);
    
    table = gtk_table_new(1, 2, 0);
    gtk_container_set_border_width(GTK_CONTAINER(table), 10);
@@ -575,13 +747,31 @@ void show_3D_preview(GimpDrawable *drawable)
    opt = gtk_option_menu_new();
    gtk_widget_show(opt);
    menu = gimp_drawable_menu_new(dialog_constrain,
-                                 basemap_callback,
-                                 0, bumpmap_drawable_id);
+                                 diffusemap_callback,
+                                 0, normalmap_drawable_id);
    gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
    gimp_table_attach_aligned(GTK_TABLE(table), 0, 0,
-                             "Base map:", 0, 0.5,
+                             "Diffuse map:", 0, 0.5,
                              opt, 2, 0);
+
+   vbox2 = gtk_vbox_new(0, 0);
+   gtk_container_set_border_width(GTK_CONTAINER(vbox2), 10);
+   gtk_box_pack_start(GTK_BOX(vbox), vbox2, 0, 0, 0);
+   gtk_widget_show(vbox2);
    
+   parallax_check = check = gtk_check_button_new_with_label("Parallax bump mapping");
+   gtk_widget_show(check);
+   gtk_box_pack_start(GTK_BOX(vbox2), check, 0, 0, 0);
+   gtk_signal_connect(GTK_OBJECT(check), "clicked",
+                      GTK_SIGNAL_FUNC(toggle_clicked), &parallax);
+
+   specular_check = check = gtk_check_button_new_with_label("Specular lighting");
+   gtk_widget_show(check);
+   gtk_box_pack_start(GTK_BOX(vbox2), check, 0, 0, 0);
+   gtk_signal_connect(GTK_OBJECT(check), "clicked",
+                      GTK_SIGNAL_FUNC(toggle_clicked), &specular);
+   
+   gtk_widget_show(glarea);
    gtk_widget_show(window);
    
    _active = 1;
@@ -639,17 +829,18 @@ void update_3D_preview(unsigned int w, unsigned int h, int bpp,
    }
 
    glActiveTexture(GL_TEXTURE0);
-   glBindTexture(GL_TEXTURE_2D, bumpID);
+   glBindTexture(GL_TEXTURE_2D, normal_tex);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+   glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, bpp, w_pot, h_pot, 0,
                 (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, tmp);
    
-   bump_s = (float)w / (float)w_pot;
-   bump_t = (float)h / (float)h_pot;
+   normal_s = (float)w / (float)w_pot;
+   normal_t = (float)h / (float)h_pot;
    
    if(tmp != image)
       g_free(tmp);
