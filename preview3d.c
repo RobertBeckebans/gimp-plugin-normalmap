@@ -86,7 +86,7 @@ static const char *parallax_frag_source =
    "   if(parallax)\n"
    "   {\n"
    "      float height = texture2D(sNormal, tex0).a;\n"
-   "      height = height * 0.04 - 0.02;\n"
+   "      height = height * 0.06 - 0.03;\n"
    "      offset0 -= (V.xy * height);\n"
    "      offset1 -= (V.xy * height);\n"
    "   }\n"
@@ -557,7 +557,7 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
    }
    else if(state & GDK_BUTTON3_MASK)
    {
-      zoom += (-dy * 0.5f);
+      zoom += (-dy * 0.2f);
    }
    
    mx = x;
@@ -681,6 +681,13 @@ static void toggle_clicked(GtkWidget *widget, gpointer data)
    gtk_widget_queue_draw(glarea);
 }
 
+static void reset_view_clicked(GtkWidget *widget, gpointer data)
+{
+   rot[0] = rot[1] = rot[2] = 0;
+   zoom = 3;
+   gtk_widget_queue_draw(glarea);
+}
+
 void show_3D_preview(GimpDrawable *drawable)
 {
    GtkWidget *vbox, *vbox2;
@@ -688,6 +695,7 @@ void show_3D_preview(GimpDrawable *drawable)
    GtkWidget *opt;
    GtkWidget *menu;
    GtkWidget *check;
+   GtkWidget *btn;
    GdkGLConfig *glconfig;
    
    parallax = 0;
@@ -737,11 +745,16 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_widget_set_usize(glarea, 400, 400);
    
    gtk_box_pack_start(GTK_BOX(vbox), glarea, 1, 1, 0);
+
+   vbox2 = gtk_vbox_new(0, 0);
+   gtk_container_set_border_width(GTK_CONTAINER(vbox2), 10);
+   gtk_box_set_spacing(GTK_BOX(vbox2), 5);
+   gtk_box_pack_start(GTK_BOX(vbox), vbox2, 0, 0, 0);
+   gtk_widget_show(vbox2);
    
    table = gtk_table_new(1, 2, 0);
-   gtk_container_set_border_width(GTK_CONTAINER(table), 10);
    gtk_table_set_col_spacings(GTK_TABLE(table), 10);
-   gtk_box_pack_start(GTK_BOX(vbox), table, 0, 0, 0);
+   gtk_box_pack_start(GTK_BOX(vbox2), table, 0, 0, 0);
    gtk_widget_show(table);
    
    opt = gtk_option_menu_new();
@@ -754,11 +767,6 @@ void show_3D_preview(GimpDrawable *drawable)
                              "Diffuse map:", 0, 0.5,
                              opt, 2, 0);
 
-   vbox2 = gtk_vbox_new(0, 0);
-   gtk_container_set_border_width(GTK_CONTAINER(vbox2), 10);
-   gtk_box_pack_start(GTK_BOX(vbox), vbox2, 0, 0, 0);
-   gtk_widget_show(vbox2);
-   
    parallax_check = check = gtk_check_button_new_with_label("Parallax bump mapping");
    gtk_widget_show(check);
    gtk_box_pack_start(GTK_BOX(vbox2), check, 0, 0, 0);
@@ -770,6 +778,12 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_box_pack_start(GTK_BOX(vbox2), check, 0, 0, 0);
    gtk_signal_connect(GTK_OBJECT(check), "clicked",
                       GTK_SIGNAL_FUNC(toggle_clicked), &specular);
+   
+   btn = gtk_button_new_with_label("Reset view");
+   gtk_widget_show(btn);
+   gtk_box_pack_start(GTK_BOX(vbox2), btn, 0, 0, 0);
+   gtk_signal_connect(GTK_OBJECT(btn), "clicked",
+                      GTK_SIGNAL_FUNC(reset_view_clicked), 0);
    
    gtk_widget_show(glarea);
    gtk_widget_show(window);

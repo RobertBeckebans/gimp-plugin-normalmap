@@ -39,6 +39,12 @@ enum FILTER_TYPE
    MAX_FILTER_TYPE
 };
 
+enum ALPHA_TYPE
+{
+   ALPHA_NONE = 0, ALPHA_HEIGHT, ALPHA_INVERSE_HEIGHT, ALPHA_ZERO, ALPHA_ONE,
+   ALPHA_INVERT, ALPHA_MAP, MAX_ALPHA_TYPE
+};
+
 enum CONVERSION_TYPE
 {
    CONVERT_NONE = 0, CONVERT_BIASED_RGB, CONVERT_RED, CONVERT_GREEN, 
@@ -360,7 +366,7 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
       return(-1);
    }
 
-   if(!nmapvals.dudv && drawable->bpp == 4 && nmapvals.alpha == 4 &&
+   if(!nmapvals.dudv && drawable->bpp == 4 && nmapvals.alpha == ALPHA_MAP &&
       nmapvals.alphamap_id != 0)
    {
       GimpDrawable *alphamap = gimp_drawable_get(nmapvals.alphamap_id);
@@ -855,15 +861,19 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
             {
                switch(nmapvals.alpha)
                {
-                  case 0:
+                  case ALPHA_NONE:
                      *d++ = s[3]; break;
-                  case 1:
+                  case ALPHA_HEIGHT:
                      *d++ = (unsigned char)(heights[x + y * width] * 255.0f); break;
-                  case 2:
+                  case ALPHA_INVERSE_HEIGHT:
+                     *d++ = 255 - (unsigned char)(heights[x + y * width] * 255.0f); break;
+                  case ALPHA_ZERO:
                      *d++ = 0; break;
-                  case 3:
+                  case ALPHA_ONE:
                      *d++ = 255; break;
-                  case 4:
+                  case ALPHA_INVERT:
+                     *d++ = 255 - s[3]; break;
+                  case ALPHA_MAP:
                      *d++ = sample_alpha_map(amap, x, y, amap_w, amap_h,
                                              width, height); break;
                   default:
@@ -1120,7 +1130,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    GtkWidget *frame;
    int num_amaps = 0;
    
-   if(nmapvals.alpha == 4)
+   if(nmapvals.alpha == ALPHA_MAP)
    {
       if(!gimp_drawable_get(nmapvals.alphamap_id) ||
          !gimp_drawable_is_gray(nmapvals.alphamap_id))
@@ -1380,38 +1390,50 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 	menuitem = gtk_menu_item_new_with_label("Unchanged");
 	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
 							 GTK_SIGNAL_FUNC(alpha_result_selected), 
-							 (gpointer)0);
+							 (gpointer)ALPHA_NONE);
 	gtk_widget_show(menuitem);
 	gtk_menu_append(GTK_MENU(menu), menuitem);
    menuitem = gtk_menu_item_new_with_label("Height");
    gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
                       GTK_SIGNAL_FUNC(alpha_result_selected), 
-                      (gpointer)1);
+                      (gpointer)ALPHA_HEIGHT);
+   gtk_widget_show(menuitem);
+   gtk_menu_append(GTK_MENU(menu), menuitem);
+   menuitem = gtk_menu_item_new_with_label("Inverse height");
+   gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+                      GTK_SIGNAL_FUNC(alpha_result_selected), 
+                      (gpointer)ALPHA_INVERSE_HEIGHT);
    gtk_widget_show(menuitem);
    gtk_menu_append(GTK_MENU(menu), menuitem);
    menuitem = gtk_menu_item_new_with_label("Set to 0");
    gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
                       GTK_SIGNAL_FUNC(alpha_result_selected), 
-                      (gpointer)2);
+                      (gpointer)ALPHA_ZERO);
    gtk_widget_show(menuitem);
    gtk_menu_append(GTK_MENU(menu), menuitem);
    menuitem = gtk_menu_item_new_with_label("Set to 1");
    gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
                       GTK_SIGNAL_FUNC(alpha_result_selected), 
-                      (gpointer)3);
+                      (gpointer)ALPHA_ONE);
+   gtk_widget_show(menuitem);
+   gtk_menu_append(GTK_MENU(menu), menuitem);
+   menuitem = gtk_menu_item_new_with_label("Invert");
+   gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+                      GTK_SIGNAL_FUNC(alpha_result_selected), 
+                      (gpointer)ALPHA_INVERT);
    gtk_widget_show(menuitem);
    gtk_menu_append(GTK_MENU(menu), menuitem);
    menuitem = gtk_menu_item_new_with_label("Use alpha map");
    gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
                       GTK_SIGNAL_FUNC(alpha_result_selected), 
-                      (gpointer)4);
+                      (gpointer)ALPHA_MAP);
    gtk_widget_show(menuitem);
    gtk_menu_append(GTK_MENU(menu), menuitem);
 
    if(num_amaps == 0)
    {
       gtk_widget_set_sensitive(menuitem, 0);
-      if(nmapvals.alpha == 4)
+      if(nmapvals.alpha == ALPHA_MAP)
          nmapvals.alpha = 0;
    }
 
