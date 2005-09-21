@@ -28,9 +28,10 @@
 #include <libgimp/gimp.h>
 #include <libgimp/gimpui.h>
 
+#include "scale.h"
 #include "preview3d.h"
 
-#define PREVIEW_SIZE 128
+#define PREVIEW_SIZE 150
 
 enum FILTER_TYPE
 {
@@ -62,12 +63,16 @@ enum DUDV_TYPE
 typedef struct
 {
 	gint filter;
+   gdouble minz;
    gdouble scale;
    gint wrap;
    gint height_source;
    gint alpha;
    gint conversion;
    gint dudv;
+   gint xinvert;
+   gint yinvert;
+   gint swapRGB;
    gint32 alphamap_id;
 } NormalmapVals;
 
@@ -84,9 +89,20 @@ GimpPlugInInfo PLUG_IN_INFO =
 	0, 0, query, run
 };
 
-NormalmapVals nmapvals=
+NormalmapVals nmapvals =
 {
-	0, 1, 0, 0, 0, 0, 0, 0
+	.filter = 0,
+   .minz = 0.0,
+   .scale = 1.0,
+   .wrap = 0,
+   .height_source = 0,
+   .alpha = ALPHA_NONE,
+   .conversion = CONVERT_NONE,
+   .dudv = DUDV_NONE,
+   .xinvert = 0,
+   .yinvert = 0,
+   .swapRGB = 0,
+   .alphamap_id = 0
 };
 
 static const float oneover255 = 1.0f / 255.0f;
@@ -106,12 +122,16 @@ static void query(void)
 		{GIMP_PDB_IMAGE, "image", "Input image (unused)"},
 		{GIMP_PDB_DRAWABLE, "drawable", "Input drawable"},
 		{GIMP_PDB_INT32, "filter", "Filter type (0 = 4 sample, 1 = sobel 3x3, 2 = sobel 5x5, 3 = prewitt 3x3, 4 = prewitt 5x5, 5-8 = 3x3,5x5,7x7,9x9)"},
+      {GIMP_PDB_FLOAT, "minz", "Minimun Z (0 to 1)"},
       {GIMP_PDB_FLOAT, "scale", "Scale (>0)"},
       {GIMP_PDB_INT32, "wrap", "Wrap (0 = no)"},
       {GIMP_PDB_INT32, "height_source", "Height source (0 = average RGB, 1 = alpha channel)"},
       {GIMP_PDB_INT32, "alpha", "Alpha (0 = unchanged, 1 = set to height, 2 = set to 0, 3 = set to 1, 4 = set to alpha map value)"},
       {GIMP_PDB_INT32, "conversion", "Conversion (0 = normalize only, 1 = Biased RGB, 2 = Red, 3 = Green, 4 = Blue, 5 = Max RGB, 6 = Colorspace"},
       {GIMP_PDB_INT32, "dudv", "DU/DV map (0 = none, 1 = 8-bit, 2 = 16-bit)"},
+      {GIMP_PDB_INT32, "xinvert", "Invert X component of normal"},
+      {GIMP_PDB_INT32, "yinvert", "Invert Y component of normal"},
+      {GIMP_PDB_INT32, "swapRGB", "Swap RGB components"},
       {GIMP_PDB_DRAWABLE, "alphamap", "Alpha map drawable"}
 	};
 	static gint nargs = sizeof(args) / sizeof(args[0]);
@@ -164,13 +184,17 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
 		   else
 		   {
 			   nmapvals.filter = param[3].data.d_int32;
-            nmapvals.scale = param[4].data.d_float;
-            nmapvals.wrap = param[5].data.d_int32;
-            nmapvals.height_source = param[6].data.d_int32;
-            nmapvals.alpha = param[7].data.d_int32;
-            nmapvals.conversion = param[8].data.d_int32;
-            nmapvals.dudv = param[9].data.d_int32;
-            nmapvals.alphamap_id = gimp_drawable_get(param[10].data.d_drawable)->drawable_id;
+            nmapvals.minz = param[4].data.d_float;
+            nmapvals.scale = param[5].data.d_float;
+            nmapvals.wrap = param[6].data.d_int32;
+            nmapvals.height_source = param[7].data.d_int32;
+            nmapvals.alpha = param[8].data.d_int32;
+            nmapvals.conversion = param[9].data.d_int32;
+            nmapvals.dudv = param[10].data.d_int32;
+            nmapvals.xinvert = param[11].data.d_int32;
+            nmapvals.yinvert = param[12].data.d_int32;
+            nmapvals.swapRGB = param[13].data.d_int32;
+            nmapvals.alphamap_id = gimp_drawable_get(param[14].data.d_drawable)->drawable_id;
 			}
 		   break;
 		case GIMP_RUN_WITH_LAST_VALS:
@@ -204,7 +228,7 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
 #endif
 
 #define SQR(x)      ((x) * (x))
-#define LERP(a,b,c) ((a) * (1.0f - (c)) + ((b) * (c)))
+#define LERP(a,b,c) ((a) + ((b) - (a)) * (c))
 
 static inline void NORMALIZE(float *v)
 {
@@ -254,45 +278,6 @@ static void rotate_array(float *dst, float *src, int size)
          newy = size - x - 1;
          newx = y;
          dst[newx + newy * size] = src[x + y * size];
-      }
-   }
-}
-
-void scale_image(unsigned char *dst, int dw, int dh,
-                 unsigned char *src, int sw, int sh,
-                 int bpp)
-{
-   int n, x, y;
-   int hm1 = sh - 1;
-   int wm1 = sw - 1;
-   int xfl, yfl;
-   float xsrc, ysrc;
-   float dx, dy, val;
-   unsigned char *s, *d;
-   int rowbytes = sw * bpp;
-      
-   d = dst;
-      
-   for(y = 0; y < dh; ++y)
-   {
-      ysrc = ((float)y / (float)dh) * (float)hm1;
-      yfl = (int)ysrc;
-      dy = ysrc - (float)yfl;
-      for(x = 0; x < dw; ++x)
-      {
-         xsrc = ((float)x / (float)dw) * (float)wm1;
-         xfl = (int)xsrc;
-         dx = xsrc - (float)xfl;
-         
-         s = src + ((yfl * rowbytes) + (xfl * bpp));
-         for(n = 0; n < bpp; ++n)
-         {
-            val = LERP(LERP(s[0], s[bpp], dx),
-                       LERP(s[rowbytes], s[rowbytes + bpp], dx),
-                       dy);
-            *d++ = (unsigned char)val;
-            s++;
-         }
       }
    }
 }
@@ -706,7 +691,7 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
       unsigned int sum[3];
 
       tmp = g_malloc(16 * 16 * bpp);
-      scale_image(tmp, 16, 16, src, width, height, bpp);
+      scale_pixels(tmp, 16, 16, src, width, height, bpp);
 
       sum[0] = sum[1] = sum[2] = 0;
       
@@ -851,6 +836,21 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
          
          NORMALIZE(n);
          
+         if(n[2] < nmapvals.minz)
+         {
+            n[2] = nmapvals.minz;
+            NORMALIZE(n);
+         }
+         
+         if(nmapvals.xinvert) n[0] = -n[0];
+         if(nmapvals.yinvert) n[1] = -n[1];
+         if(nmapvals.swapRGB)
+         {
+            val = n[0];
+            n[0] = n[2];
+            n[2] = val;
+         }
+         
          if(!nmapvals.dudv)
          {
             *d++ = (unsigned char)((n[0] + 1.0f) * 127.5f);
@@ -927,7 +927,7 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
       rowbytes = pw * bpp;
       
       tmp = g_malloc(pw * ph * bpp);
-      scale_image(tmp, pw, ph, dst, width, height, bpp);
+      scale_pixels(tmp, pw, ph, dst, width, height, bpp);
       
       gimp_preview_area_draw(GIMP_PREVIEW_AREA(preview), 0, 0, pw, ph,
                              (bpp == 4) ? GIMP_RGBA_IMAGE : GIMP_RGB_IMAGE,
@@ -984,6 +984,12 @@ static void filter_type_selected(GtkWidget *widget, gpointer data)
       nmapvals.filter = (gint)data;
       update_preview = 1;
    }
+}
+
+static void minz_changed(GtkWidget *widget, gpointer data)
+{
+   nmapvals.minz = gtk_spin_button_get_value(GTK_SPIN_BUTTON(data));
+   update_preview = 1;
 }
 
 static void scale_changed(GtkWidget *widget, gpointer data)
@@ -1082,6 +1088,12 @@ static void dudv_selected(GtkWidget *widget, gpointer data)
    update_preview = 1;
 }
 
+static void toggle_clicked(GtkWidget *widget, gpointer data)
+{
+   *((int*)data) = !(*((int*)data));
+   update_preview = 1;
+}
+
 static gint dialog_constrain(gint32 image_id, gint32 drawable_id,
                              gpointer data)
 {
@@ -1128,6 +1140,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    GtkObject *adj;
    GtkWidget *spin;
    GtkWidget *frame;
+   GtkWidget *check;
    int num_amaps = 0;
    
    if(nmapvals.alpha == ALPHA_MAP)
@@ -1155,12 +1168,12 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 							 GTK_SIGNAL_FUNC(do_cleanup),
 							 0);
    
-   hbox = gtk_hbox_new(0, 10);
-   gtk_container_set_border_width(GTK_CONTAINER(hbox), 10);
+   hbox = gtk_hbox_new(0, 8);
+   gtk_container_set_border_width(GTK_CONTAINER(hbox), 8);
    gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox),hbox, 1, 1, 0);
    gtk_widget_show(hbox);
    
-   vbox = gtk_vbox_new(0, 10);
+   vbox = gtk_vbox_new(0, 8);
    gtk_box_pack_start(GTK_BOX(hbox), vbox, 1, 1, 0);
    gtk_widget_show(vbox);
    
@@ -1202,16 +1215,16 @@ static gint normalmap_dialog(GimpDrawable *drawable)
                                  alphamap_callback,
                                  &num_amaps, drawable->drawable_id);
    gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
-   gtk_box_pack_start(GTK_BOX(vbox), opt, 1, 1, 0);
+   gtk_box_pack_start(GTK_BOX(vbox), opt, 0, 0, 0);
    
    if(drawable->bpp != 4)
       gtk_widget_set_sensitive(opt, 0);
    
-	table = gtk_table_new(7, 2, 0);
+	table = gtk_table_new(8, 2, 0);
 	gtk_widget_show(table);
 	gtk_box_pack_start(GTK_BOX(hbox), table, 1, 1, 0);
-	gtk_table_set_row_spacings(GTK_TABLE(table), 10);
-	gtk_table_set_col_spacings(GTK_TABLE(table), 10);
+	gtk_table_set_row_spacings(GTK_TABLE(table), 8);
+	gtk_table_set_col_spacings(GTK_TABLE(table), 8);
 	
 	label = gtk_label_new("Filter:");
 	gtk_widget_show(label);
@@ -1223,8 +1236,8 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
 	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 0, 1,
-						  (GtkAttachOptions)(GTK_EXPAND|GTK_FILL),
-						  (GtkAttachOptions)(GTK_EXPAND), 0, 0);
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
+						  (GtkAttachOptions)(0), 0, 0);
 	
 	menu = gtk_menu_new();
 	
@@ -1284,10 +1297,27 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 	gtk_menu_append(GTK_MENU(menu), menuitem);
 	gtk_menu_set_active(GTK_MENU(menu), nmapvals.filter);
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
+   
+   label = gtk_label_new("Minimum Z:");
+   gtk_widget_show(label);
+   gtk_table_attach(GTK_TABLE(table), label, 0, 1, 1, 2,
+                    (GtkAttachOptions)(GTK_FILL),
+                    (GtkAttachOptions)(0), 0, 0);
+   gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 
+   adj = gtk_adjustment_new(nmapvals.minz, 0, 1, 0.1, 0.25, 0.5);
+   spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.1, 5);
+   gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
+   gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
+                      GTK_SIGNAL_FUNC(minz_changed), spin);
+	gtk_table_attach(GTK_TABLE(table), spin, 1, 2, 1, 2,
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
+						  (GtkAttachOptions)(0), 0, 0);
+   gtk_widget_show(spin);
+   
 	label = gtk_label_new("Scale:");
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 1, 2,
+	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 2, 3,
 						  (GtkAttachOptions)(GTK_FILL),
 						  (GtkAttachOptions)(0), 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
@@ -1297,23 +1327,23 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
    gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
                       GTK_SIGNAL_FUNC(scale_changed), spin);
-	gtk_table_attach(GTK_TABLE(table), spin, 1, 2, 1, 2,
-						  (GtkAttachOptions)(GTK_EXPAND|GTK_FILL),
-						  (GtkAttachOptions)(GTK_EXPAND), 0, 0);
+	gtk_table_attach(GTK_TABLE(table), spin, 1, 2, 2, 3,
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
+						  (GtkAttachOptions)(0), 0, 0);
    gtk_widget_show(spin);
    
 	label = gtk_label_new("Wrap:");
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 2, 3, 
+	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 3, 4,
 						  (GtkAttachOptions)(GTK_FILL), 
 						  (GtkAttachOptions)(0), 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 2, 3, 
-						  (GtkAttachOptions)(GTK_EXPAND|GTK_FILL), 
-						  (GtkAttachOptions)(GTK_EXPAND), 0, 0);
+	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 3, 4, 
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
+						  (GtkAttachOptions)(0), 0, 0);
 	
 	menu = gtk_menu_new();
 	
@@ -1334,16 +1364,16 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 
 	label = gtk_label_new("Height source:");
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 3, 4, 
+	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 4, 5, 
 						  (GtkAttachOptions)(GTK_FILL), 
 						  (GtkAttachOptions)(0), 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 3, 4, 
-						  (GtkAttachOptions)(GTK_EXPAND|GTK_FILL), 
-						  (GtkAttachOptions)(GTK_EXPAND), 0, 0);
+	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 4, 5, 
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
+						  (GtkAttachOptions)(0), 0, 0);
 	
 	menu = gtk_menu_new();
    
@@ -1371,16 +1401,16 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    
 	label = gtk_label_new("Alpha channel:");
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 4, 5, 
+	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 5, 6, 
 						  (GtkAttachOptions)(GTK_FILL), 
 						  (GtkAttachOptions)(0), 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	
 	opt = alpha_result_opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 4, 5, 
-						  (GtkAttachOptions)(GTK_EXPAND|GTK_FILL), 
-						  (GtkAttachOptions)(GTK_EXPAND), 0, 0);
+	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 5, 6, 
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
+						  (GtkAttachOptions)(0), 0, 0);
    
    if(drawable->bpp != 4)
       nmapvals.alpha = 0;
@@ -1445,16 +1475,16 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 
 	label = gtk_label_new("Conversion:");
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 5, 6, 
+	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 6, 7, 
 						  (GtkAttachOptions)(GTK_FILL), 
 						  (GtkAttachOptions)(0), 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 5, 6, 
-						  (GtkAttachOptions)(GTK_EXPAND|GTK_FILL), 
-						  (GtkAttachOptions)(GTK_EXPAND), 0, 0);
+	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 6, 7, 
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
+						  (GtkAttachOptions)(0), 0, 0);
    
    g_object_set_data(G_OBJECT(item_height_source[0]), "conversion_opt", opt);
    g_object_set_data(G_OBJECT(item_height_source[1]), "conversion_opt", opt);
@@ -1524,16 +1554,16 @@ static gint normalmap_dialog(GimpDrawable *drawable)
  
 	label = gtk_label_new("DU/DV map:");
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 6, 7, 
+	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 7, 8, 
 						  (GtkAttachOptions)(GTK_FILL), 
 						  (GtkAttachOptions)(0), 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 6, 7, 
-						  (GtkAttachOptions)(GTK_EXPAND|GTK_FILL), 
-						  (GtkAttachOptions)(GTK_EXPAND), 0, 0);
+	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 7, 8, 
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
+						  (GtkAttachOptions)(0), 0, 0);
    
    if(drawable->bpp != 4 && (nmapvals.dudv == DUDV_16BIT_SIGNED ||
                              nmapvals.dudv == DUDV_16BIT_UNSIGNED))
@@ -1588,6 +1618,31 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 
    gtk_menu_set_active(GTK_MENU(menu), nmapvals.dudv);
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
+   
+   frame = gtk_frame_new("Options");
+   gtk_box_pack_start(GTK_BOX(hbox), frame, 0, 1, 0);
+   gtk_widget_show(frame);
+
+   vbox = gtk_vbox_new(0, 0);
+   gtk_widget_show(vbox);
+   gtk_container_set_border_width(GTK_CONTAINER(vbox), 4);
+   gtk_container_add(GTK_CONTAINER(frame), vbox);
+   
+   check = gtk_check_button_new_with_label("Invert X");
+   gtk_widget_show(check);
+   gtk_box_pack_start(GTK_BOX(vbox), check, 0, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(check), "clicked",
+                      GTK_SIGNAL_FUNC(toggle_clicked), &nmapvals.xinvert);
+   check = gtk_check_button_new_with_label("Invert Y");
+   gtk_widget_show(check);
+   gtk_box_pack_start(GTK_BOX(vbox), check, 0, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(check), "clicked",
+                      GTK_SIGNAL_FUNC(toggle_clicked), &nmapvals.yinvert);
+   check = gtk_check_button_new_with_label("Swap RGB");
+   gtk_widget_show(check);
+   gtk_box_pack_start(GTK_BOX(vbox), check, 0, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(check), "clicked",
+                      GTK_SIGNAL_FUNC(toggle_clicked), &nmapvals.swapRGB);
    
 	gtk_widget_show(dialog);
 
