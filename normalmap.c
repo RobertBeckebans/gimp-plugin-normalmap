@@ -50,7 +50,7 @@ enum CONVERSION_TYPE
 {
    CONVERT_NONE = 0, CONVERT_BIASED_RGB, CONVERT_RED, CONVERT_GREEN, 
    CONVERT_BLUE, CONVERT_MAX_RGB, CONVERT_MIN_RGB, CONVERT_COLORSPACE,
-   CONVERT_NORMALIZE_ONLY, MAX_CONVERSION_TYPE
+   CONVERT_NORMALIZE_ONLY, CONVERT_HEIGHTMAP, MAX_CONVERSION_TYPE
 };
 
 enum DUDV_TYPE
@@ -73,6 +73,7 @@ typedef struct
    gint xinvert;
    gint yinvert;
    gint swapRGB;
+   gdouble contrast;
    gint32 alphamap_id;
 } NormalmapVals;
 
@@ -102,6 +103,7 @@ NormalmapVals nmapvals =
    .xinvert = 0,
    .yinvert = 0,
    .swapRGB = 0,
+   .contrast = 0.0,
    .alphamap_id = 0
 };
 
@@ -126,12 +128,13 @@ static void query(void)
       {GIMP_PDB_FLOAT, "scale", "Scale (>0)"},
       {GIMP_PDB_INT32, "wrap", "Wrap (0 = no)"},
       {GIMP_PDB_INT32, "height_source", "Height source (0 = average RGB, 1 = alpha channel)"},
-      {GIMP_PDB_INT32, "alpha", "Alpha (0 = unchanged, 1 = set to height, 2 = set to 0, 3 = set to 1, 4 = set to alpha map value)"},
-      {GIMP_PDB_INT32, "conversion", "Conversion (0 = normalize only, 1 = Biased RGB, 2 = Red, 3 = Green, 4 = Blue, 5 = Max RGB, 6 = Colorspace"},
-      {GIMP_PDB_INT32, "dudv", "DU/DV map (0 = none, 1 = 8-bit, 2 = 16-bit)"},
+      {GIMP_PDB_INT32, "alpha", "Alpha (0 = unchanged, 1 = set to height, 2 = set to inverse height, 3 = set to 0, 4 = set to 1, 5 = invert, 6 = set to alpha map value)"},
+      {GIMP_PDB_INT32, "conversion", "Conversion (0 = normalize only, 1 = Biased RGB, 2 = Red, 3 = Green, 4 = Blue, 5 = Max RGB, 6 = Min RGB, 7 = Colorspace, 8 = Normalize only, 9 = Convert to height map)"},
+      {GIMP_PDB_INT32, "dudv", "DU/DV map (0 = none, 1 = 8-bit, 2 = 8-bit unsigned, 3 = 16-bit, 4 = 16-bit unsigned)"},
       {GIMP_PDB_INT32, "xinvert", "Invert X component of normal"},
       {GIMP_PDB_INT32, "yinvert", "Invert Y component of normal"},
       {GIMP_PDB_INT32, "swapRGB", "Swap RGB components"},
+      {GIMP_PDB_FLOAT, "contrast", "Height contrast (0 to 1). If converting to a height map, this value is applied to the results"},
       {GIMP_PDB_DRAWABLE, "alphamap", "Alpha map drawable"}
 	};
 	static gint nargs = sizeof(args) / sizeof(args[0]);
@@ -179,7 +182,7 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
 			}
 		   break;
 		case GIMP_RUN_NONINTERACTIVE:
-		   if(nparams != 5)
+		   if(nparams != 16)
 				status=GIMP_PDB_CALLING_ERROR;
 		   else
 		   {
@@ -194,7 +197,8 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
             nmapvals.xinvert = param[11].data.d_int32;
             nmapvals.yinvert = param[12].data.d_int32;
             nmapvals.swapRGB = param[13].data.d_int32;
-            nmapvals.alphamap_id = gimp_drawable_get(param[14].data.d_drawable)->drawable_id;
+            nmapvals.contrast = param[14].data.d_float;
+            nmapvals.alphamap_id = gimp_drawable_get(param[15].data.d_drawable)->drawable_id;
 			}
 		   break;
 		case GIMP_RUN_WITH_LAST_VALS:
@@ -302,6 +306,132 @@ static int sample_alpha_map(unsigned char *pixels, int x, int y,
                  LERP(src[row], src[row + 1], dx),
                  dy);
    return((unsigned char)height);
+}
+
+static void make_heightmap(unsigned char *image, int w, int h, int bpp)
+{
+   unsigned int i, num_pixels = w * h;
+   int x, y;
+   float v, hmin, hmax;
+   float *s, *r;
+   
+   s = (float*)g_malloc(w * h * 3 * sizeof(float));
+   if(s == 0)
+   {
+      g_message("Memory allocation error!");
+      return;
+   }
+   r = (float*)g_malloc(w * h * 4 * sizeof(float));
+   if(r == 0)
+   {
+      g_free(s);
+      g_message("Memory allocation error!");
+      return;
+   }
+   
+   for(i = 0; i < num_pixels; ++i)
+   {
+      s[3 * i + 0] = (((float)image[bpp * i + 0] / 255.0f) - 0.5) * 2.0f;
+      s[3 * i + 1] = (((float)image[bpp * i + 1] / 255.0f) - 0.5) * 2.0f;
+      s[3 * i + 2] = (((float)image[bpp * i + 2] / 255.0f) - 0.5) * 2.0f;
+   }
+   
+   memset(r, 0, w * h * 4 * sizeof(float));
+
+#define S(x, y, n) s[(y) * (w * 3) + ((x) * 3) + (n)]
+#define R(x, y, n) r[(y) * (w * 4) + ((x) * 4) + (n)]
+
+   /* top-left to bottom-right */
+   for(x = 1; x < w; ++x)
+      R(x, 0, 0) = R(x - 1, 0, 0) + S(x - 1, 0, 0);
+   for(y = 1; y < h; ++y)
+      R(0, y, 0) = R(0, y - 1, 0) + S(0, y - 1, 1);
+   for(y = 1; y < h; ++y)
+   {
+      for(x = 1; x < w; ++x)
+      {
+         R(x, y, 0) = (R(x, y - 1, 0) + R(x - 1, y, 0) +
+                       S(x - 1, y, 0) + S(x, y - 1, 1)) * 0.5f;
+      }
+   }
+
+   /* top-right to bottom-left */
+   for(x = w - 2; x >= 0; --x)
+      R(x, 0, 1) = R(x + 1, 0, 1) - S(x + 1, 0, 0);
+   for(y = 1; y < h; ++y)
+      R(0, y, 1) = R(0, y - 1, 1) + S(0, y - 1, 1);
+   for(y = 1; y < h; ++y)
+   {
+      for(x = w - 2; x >= 0; --x)
+      {
+         R(x, y, 1) = (R(x, y - 1, 1) + R(x + 1, y, 1) -
+                       S(x + 1, y, 0) + S(x, y - 1, 1)) * 0.5f;
+      }
+   }
+
+   /* bottom-left to top-right */
+   for(x = 1; x < w; ++x)
+      R(x, 0, 2) = R(x - 1, 0, 2) + S(x - 1, 0, 0);
+   for(y = h - 2; y >= 0; --y)
+      R(0, y, 2) = R(0, y + 1, 2) - S(0, y + 1, 1);
+   for(y = h - 2; y >= 0; --y)
+   {
+      for(x = 1; x < w; ++x)
+      {
+         R(x, y, 2) = (R(x, y + 1, 2) + R(x - 1, y, 2) +
+                       S(x - 1, y, 0) - S(x, y + 1, 1)) * 0.5f;
+      }
+   }
+
+   /* bottom-right to top-left */
+   for(x = w - 2; x >= 0; --x)
+      R(x, 0, 3) = R(x + 1, 0, 3) - S(x + 1, 0, 0);
+   for(y = h - 2; y >= 0; --y)
+      R(0, y, 3) = R(0, y + 1, 3) - S(0, y + 1, 1);
+   for(y = h - 2; y >= 0; --y)
+   {
+      for(x = w - 2; x >= 0; --x)
+      {
+         R(x, y, 3) = (R(x, y + 1, 3) + R(x + 1, y, 3) -
+                       S(x + 1, y, 0) - S(x, y + 1, 1)) * 0.5f;
+      }
+   }
+   
+#undef S
+#undef R
+
+   /* accumulate, find min/max */
+   hmin =  1e10f;
+   hmax = -1e10f;
+   for(i = 0; i < num_pixels; ++i)
+   {
+      r[4 * i] += r[4 * i + 1] + r[4 * i + 2] + r[4 * i + 3];
+      if(r[4 * i] < hmin) hmin = r[4 * i];
+      if(r[4 * i] > hmax) hmax = r[4 * i];
+   }
+
+   /* scale into 0 - 1 range */
+   for(i = 0; i < num_pixels; ++i)
+   {   
+      v = (r[4 * i] - hmin) / (hmax - hmin);
+      /* contrast */
+      v = (v - 0.5f) * nmapvals.contrast + v;
+      if(v < 0) v = 0;
+      if(v > 1) v = 1;
+      r[4 * i] = v;
+   }
+
+   /* write out results */
+   for(i = 0; i < num_pixels; ++i)
+   {
+      v = r[4 * i] * 255.0f;
+      image[bpp * i + 0] = (unsigned char)v;
+      image[bpp * i + 1] = (unsigned char)v;
+      image[bpp * i + 2] = (unsigned char)v;
+   }
+
+   g_free(s);
+   g_free(r);
 }
 
 static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
@@ -720,7 +850,8 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
       rgb_bias[2] = 0;
    }
 
-   if(nmapvals.conversion != CONVERT_NORMALIZE_ONLY)
+   if(nmapvals.conversion != CONVERT_NORMALIZE_ONLY &&
+      nmapvals.conversion != CONVERT_HEIGHTMAP)
    {
       s = src;
       for(y = 0; y < height; ++y)
@@ -799,7 +930,8 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
 			d = dst + ((y * rowbytes) + (x * bpp));
          s = src + ((y * rowbytes) + (x * bpp));
 
-         if(nmapvals.conversion == CONVERT_NORMALIZE_ONLY)
+         if(nmapvals.conversion == CONVERT_NORMALIZE_ONLY ||
+            nmapvals.conversion == CONVERT_HEIGHTMAP)
          {
             n[0] = (((float)s[0] * oneover255) - 0.5f) * 2.0f;
             n[1] = (((float)s[1] * oneover255) - 0.5f) * 2.0f;
@@ -914,9 +1046,12 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
 		if(!preview_mode)
          gimp_progress_update((double)(y - 1) / (double)(height - 2));
 	}
+   
+   if(nmapvals.conversion == CONVERT_HEIGHTMAP)
+      make_heightmap(dst, width, height, bpp);
 	
 #undef HEIGHT
-#undef HEIGHT_WRAP	
+#undef HEIGHT_WRAP
 
    if(preview_mode)
    {
@@ -942,7 +1077,7 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
       gimp_progress_update(100.0);
       
       gimp_pixel_rgn_init(&dst_rgn, drawable, 0, 0, width, height, 1, 1);
-      gimp_pixel_rgn_set_rect(&dst_rgn,dst, 0, 0, width, height);
+      gimp_pixel_rgn_set_rect(&dst_rgn, dst, 0, 0, width, height);
       
       gimp_drawable_flush(drawable);
       gimp_drawable_merge_shadow(drawable->drawable_id, 1);
@@ -1042,9 +1177,13 @@ static void alpha_result_selected(GtkWidget *widget, gpointer data)
 
 static void conversion_selected(GtkWidget *widget, gpointer data)
 {
+   GtkWidget *contrast_spin;
+   
    if(nmapvals.conversion != (gint)data)
    {
       nmapvals.conversion = (gint)data;
+      contrast_spin = g_object_get_data(G_OBJECT(widget), "contrast_spin");
+      gtk_widget_set_sensitive(contrast_spin, nmapvals.conversion == CONVERT_HEIGHTMAP);
       update_preview = 1;
    }
 }
@@ -1085,6 +1224,12 @@ static void dudv_selected(GtkWidget *widget, gpointer data)
       gtk_widget_set_sensitive(opt, 0);
    }
       
+   update_preview = 1;
+}
+
+static void contrast_changed(GtkWidget *widget, gpointer data)
+{
+   nmapvals.contrast = gtk_spin_button_get_value(GTK_SPIN_BUTTON(data));
    update_preview = 1;
 }
 
@@ -1141,6 +1286,8 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    GtkWidget *spin;
    GtkWidget *frame;
    GtkWidget *check;
+   GtkWidget *conversion_menu;
+   GList *curr;
    int num_amaps = 0;
    
    if(nmapvals.alpha == ALPHA_MAP)
@@ -1220,7 +1367,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    if(drawable->bpp != 4)
       gtk_widget_set_sensitive(opt, 0);
    
-	table = gtk_table_new(8, 2, 0);
+	table = gtk_table_new(9, 2, 0);
 	gtk_widget_show(table);
 	gtk_box_pack_start(GTK_BOX(hbox), table, 1, 1, 0);
 	gtk_table_set_row_spacings(GTK_TABLE(table), 8);
@@ -1305,8 +1452,8 @@ static gint normalmap_dialog(GimpDrawable *drawable)
                     (GtkAttachOptions)(0), 0, 0);
    gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 
-   adj = gtk_adjustment_new(nmapvals.minz, 0, 1, 0.1, 0.25, 0.5);
-   spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.1, 5);
+   adj = gtk_adjustment_new(nmapvals.minz, 0, 1, 0.01, 0.05, 0.1);
+   spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.01, 5);
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
    gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
                       GTK_SIGNAL_FUNC(minz_changed), spin);
@@ -1380,7 +1527,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    if(drawable->bpp != 4)
       nmapvals.height_source = 0;
 	
-	menuitem=item_height_source[0] = gtk_menu_item_new_with_label("Average RGB");
+	menuitem = item_height_source[0] = gtk_menu_item_new_with_label("Average RGB");
 	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
 							 GTK_SIGNAL_FUNC(height_source_selected), 
 							 (gpointer)0);
@@ -1489,7 +1636,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    g_object_set_data(G_OBJECT(item_height_source[0]), "conversion_opt", opt);
    g_object_set_data(G_OBJECT(item_height_source[1]), "conversion_opt", opt);
    
-	menu = gtk_menu_new();
+	conversion_menu = menu = gtk_menu_new();
 	
 	menuitem = gtk_menu_item_new_with_label("None");
 	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
@@ -1543,6 +1690,12 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
                       GTK_SIGNAL_FUNC(conversion_selected), 
                       (gpointer)CONVERT_NORMALIZE_ONLY);
+   gtk_widget_show(menuitem);
+   gtk_menu_append(GTK_MENU(menu), menuitem);
+   menuitem = gtk_menu_item_new_with_label("Convert to height");
+   gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+                      GTK_SIGNAL_FUNC(conversion_selected), 
+                      (gpointer)CONVERT_HEIGHTMAP);
    gtk_widget_show(menuitem);
    gtk_menu_append(GTK_MENU(menu), menuitem);
 
@@ -1618,6 +1771,32 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 
    gtk_menu_set_active(GTK_MENU(menu), nmapvals.dudv);
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
+
+   label = gtk_label_new("Contrast:");
+   gtk_widget_show(label);
+   gtk_table_attach(GTK_TABLE(table), label, 0, 1, 8, 9,
+                    (GtkAttachOptions)(GTK_FILL),
+                    (GtkAttachOptions)(0), 0, 0);
+   gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
+
+   adj = gtk_adjustment_new(nmapvals.contrast, 0, 1, 0.01, 0.05, 0.1);
+   spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.01, 5);
+   gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
+   gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
+                      GTK_SIGNAL_FUNC(contrast_changed), spin);
+	gtk_table_attach(GTK_TABLE(table), spin, 1, 2, 8, 9,
+						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
+						  (GtkAttachOptions)(0), 0, 0);
+   gtk_widget_show(spin);
+   
+   gtk_widget_set_sensitive(spin, nmapvals.conversion == CONVERT_HEIGHTMAP);
+
+   curr = gtk_container_get_children(GTK_CONTAINER(conversion_menu));
+   while(curr)
+   {
+      g_object_set_data(G_OBJECT(curr->data), "contrast_spin", spin);
+      curr = curr->next;
+   }
    
    frame = gtk_frame_new("Options");
    gtk_box_pack_start(GTK_BOX(hbox), frame, 0, 1, 0);
@@ -1629,16 +1808,19 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_container_add(GTK_CONTAINER(frame), vbox);
    
    check = gtk_check_button_new_with_label("Invert X");
+   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), nmapvals.xinvert);
    gtk_widget_show(check);
    gtk_box_pack_start(GTK_BOX(vbox), check, 0, 1, 0);
    gtk_signal_connect(GTK_OBJECT(check), "clicked",
                       GTK_SIGNAL_FUNC(toggle_clicked), &nmapvals.xinvert);
    check = gtk_check_button_new_with_label("Invert Y");
+   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), nmapvals.yinvert);
    gtk_widget_show(check);
    gtk_box_pack_start(GTK_BOX(vbox), check, 0, 1, 0);
    gtk_signal_connect(GTK_OBJECT(check), "clicked",
                       GTK_SIGNAL_FUNC(toggle_clicked), &nmapvals.yinvert);
    check = gtk_check_button_new_with_label("Swap RGB");
+   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), nmapvals.swapRGB);
    gtk_widget_show(check);
    gtk_box_pack_start(GTK_BOX(vbox), check, 0, 1, 0);
    gtk_signal_connect(GTK_OBJECT(check), "clicked",

@@ -346,7 +346,7 @@ static void init(GtkWidget *widget, gpointer data)
       _gl_error = 1;
    }
 
-   glClearColor(0, 0, 0.35f, 0);
+   glClearColor(0, 0, 0.4f, 0);
    glDepthFunc(GL_LEQUAL);
    glEnable(GL_DEPTH_TEST);
 
@@ -1082,7 +1082,7 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_signal_connect(GTK_OBJECT(glarea), "configure_event",
                       GTK_SIGNAL_FUNC(configure), 0);
    
-   gtk_widget_set_usize(glarea, 600, 450);
+   gtk_widget_set_usize(glarea, 500, 375);
    
    gtk_box_pack_start(GTK_BOX(vbox), glarea, 1, 1, 0);
 
