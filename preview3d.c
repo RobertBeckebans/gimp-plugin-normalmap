@@ -38,10 +38,15 @@ static int _gl_error = 0;
 static gint32 normalmap_drawable_id = -1;
 static GtkWidget *window = 0;
 static GtkWidget *glarea = 0;
+static GtkWidget *normal_radio = 0;
 static GtkWidget *parallax_radio = 0;
 static GtkWidget *relief_radio = 0;
 static GtkWidget *specular_check = 0;
 static GtkWidget *gloss_opt = 0;
+static GtkWidget *specular_exp_range = 0;
+static GtkWidget *ambient_color_btn = 0;
+static GtkWidget *diffuse_color_btn = 0;
+static GtkWidget *specular_color_btn = 0;
 
 static GLuint diffuse_tex = 0;
 static GLuint gloss_tex = 0;
@@ -224,7 +229,7 @@ static const char *relief_frag_source =
 static int bumpmapping = 0;
 static int specular = 0;
 
-static float ambient_color[3] = {0.15f, 0.15f, 0.15f};
+static float ambient_color[3] = {0.1f, 0.1f, 0.1f};
 static float diffuse_color[3] = {1, 1, 1};
 static float specular_color[3] = {1, 1, 1};
 static float specular_exp = 32.0f;
@@ -1018,28 +1023,74 @@ static void toggle_clicked(GtkWidget *widget, gpointer data)
    gtk_widget_queue_draw(glarea);
 }
 
+static void specular_exp_changed(GtkWidget *widget, gpointer data)
+{
+   specular_exp = gtk_range_get_value(GTK_RANGE(widget));
+   gtk_widget_queue_draw(glarea);
+}
+
+static void color_changed(GtkWidget *widget, gpointer data)
+{
+   float *c = (float*)data;
+   GimpRGB color;
+   
+   gimp_color_button_get_color(GIMP_COLOR_BUTTON(widget), &color);
+   c[0] = color.r;
+   c[1] = color.g;
+   c[2] = color.b;
+
+   gtk_widget_queue_draw(glarea);
+}
+
 static void reset_view_clicked(GtkWidget *widget, gpointer data)
 {
+   GimpRGB c;
+   
    rot[0] = rot[1] = rot[2] = 0;
    zoom = 2;
+   
+   specular_exp = 32.0f;
+   ambient_color[0] = ambient_color[1] = ambient_color[2] = 0.1f;
+   diffuse_color[0] = diffuse_color[1] = diffuse_color[2] = 1.0f;
+   specular_color[0] = specular_color[1] = specular_color[2] = 1.0f;
+   
+   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(normal_radio), 1);
+   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(specular_check), 0);
+   gtk_range_set_value(GTK_RANGE(specular_exp_range), specular_exp);
+   
+   gimp_rgb_set(&c, ambient_color[0], ambient_color[1], ambient_color[2]);
+   gimp_color_button_set_color(GIMP_COLOR_BUTTON(ambient_color_btn), &c);
+   gimp_rgb_set(&c, diffuse_color[0], diffuse_color[1], diffuse_color[2]);
+   gimp_color_button_set_color(GIMP_COLOR_BUTTON(diffuse_color_btn), &c);
+   gimp_rgb_set(&c, specular_color[0], specular_color[1], specular_color[2]);
+   gimp_color_button_set_color(GIMP_COLOR_BUTTON(specular_color_btn), &c);
+
+   bumpmapping = 0;
+   specular = 0;
+   
    gtk_widget_queue_draw(glarea);
 }
 
 void show_3D_preview(GimpDrawable *drawable)
 {
-   GtkWidget *vbox, *vbox2, *hbox;
+   GtkWidget *vbox, *hbox;
    GtkWidget *table;
    GtkWidget *opt;
    GtkWidget *menu;
-   GtkWidget *label;
    GtkWidget *radio;
    GtkWidget *check;
    GtkWidget *btn;
+   GtkWidget *hscale;
    GdkGLConfig *glconfig;
    GSList *group = 0;
+   GimpRGB color;
    
    bumpmapping = 0;
    specular = 0;
+   specular_exp = 32.0f;
+   ambient_color[0] = ambient_color[1] = ambient_color[2] = 0.1f;
+   diffuse_color[0] = diffuse_color[1] = diffuse_color[2] = 1.0f;
+   specular_color[0] = specular_color[1] = specular_color[2] = 1.0f;
    
    if(_active) return;
    
@@ -1086,16 +1137,11 @@ void show_3D_preview(GimpDrawable *drawable)
    
    gtk_box_pack_start(GTK_BOX(vbox), glarea, 1, 1, 0);
 
-   vbox2 = gtk_vbox_new(0, 0);
-   gtk_container_set_border_width(GTK_CONTAINER(vbox2), 10);
-   gtk_box_set_spacing(GTK_BOX(vbox2), 5);
-   gtk_box_pack_start(GTK_BOX(vbox), vbox2, 0, 0, 0);
-   gtk_widget_show(vbox2);
-   
-   table = gtk_table_new(2, 2, 0);
-   gtk_table_set_col_spacings(GTK_TABLE(table), 10);
-   gtk_table_set_row_spacings(GTK_TABLE(table), 10);
-   gtk_box_pack_start(GTK_BOX(vbox2), table, 0, 0, 0);
+   table = gtk_table_new(9, 2, 0);
+   gtk_container_set_border_width(GTK_CONTAINER(table), 5);
+   gtk_table_set_col_spacings(GTK_TABLE(table), 5);
+   gtk_table_set_row_spacings(GTK_TABLE(table), 5);
+   gtk_box_pack_start(GTK_BOX(vbox), table, 0, 0, 0);
    gtk_widget_show(table);
    
    opt = gtk_option_menu_new();
@@ -1104,9 +1150,8 @@ void show_3D_preview(GimpDrawable *drawable)
                                  diffusemap_callback,
                                  0, normalmap_drawable_id);
    gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
-   gimp_table_attach_aligned(GTK_TABLE(table), 0, 0,
-                             "Diffuse map:", 0, 0.5,
-                             opt, 2, 0);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 0, "Diffuse map:", 0, 0.5,
+                             opt, 1, 0);
    
    gloss_opt = opt = gtk_option_menu_new();
    gtk_widget_show(opt);
@@ -1114,20 +1159,18 @@ void show_3D_preview(GimpDrawable *drawable)
                                  glossmap_callback,
                                  0, normalmap_drawable_id);
    gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
-   gimp_table_attach_aligned(GTK_TABLE(table), 0, 1,
-                             "Gloss map:", 0, 0.5,
-                             opt, 2, 0);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 1, "Gloss map:", 0, 0.5,
+                             opt, 1, 0);
    
    hbox = gtk_hbox_new(0, 0);
    gtk_box_set_spacing(GTK_BOX(hbox), 5);
-   gtk_box_pack_start(GTK_BOX(vbox2), hbox, 0, 0, 0);
    gtk_widget_show(hbox);
    
-   label = gtk_label_new("Bump mapping:");
-   gtk_widget_show(label);
-   gtk_box_pack_start(GTK_BOX(hbox), label, 0, 0, 0);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 2,
+                             "Bump mapping:", 0, 0.5,
+                             hbox, 1, 0);
    
-   radio = gtk_radio_button_new_with_label(group, "Normal");
+   normal_radio = radio = gtk_radio_button_new_with_label(group, "Normal");
    gtk_widget_show(radio);
    gtk_box_pack_start(GTK_BOX(hbox), radio, 0, 0, 0);
    gtk_signal_connect(GTK_OBJECT(radio), "clicked",
@@ -1150,13 +1193,51 @@ void show_3D_preview(GimpDrawable *drawable)
 
    specular_check = check = gtk_check_button_new_with_label("Specular lighting");
    gtk_widget_show(check);
-   gtk_box_pack_start(GTK_BOX(vbox2), check, 0, 0, 0);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 3, "", 0, 0.5, check, 1, 0);
    gtk_signal_connect(GTK_OBJECT(check), "clicked",
                       GTK_SIGNAL_FUNC(toggle_clicked), &specular);
+
+   specular_exp_range = hscale = gtk_hscale_new(GTK_ADJUSTMENT(gtk_adjustment_new(32, 0, 256, 1, 8, 0)));
+   gtk_widget_show(hscale);
+   gtk_scale_set_value_pos(GTK_SCALE(hscale), GTK_POS_RIGHT);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 4, "Specular exponent:", 0, 0.5,
+                             hscale, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(hscale), "value_changed",
+                      GTK_SIGNAL_FUNC(specular_exp_changed), 0);
+   
+   
+   gimp_rgb_set(&color, ambient_color[0], ambient_color[1], ambient_color[2]);
+   ambient_color_btn = btn = gimp_color_button_new("Ambient color", 0, 15, &color, GIMP_COLOR_AREA_FLAT);
+   gtk_widget_show(btn);
+   gimp_color_button_set_color(GIMP_COLOR_BUTTON(btn), &color);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 5, "Ambient color:", 0, 0.5,
+                             btn, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(btn), "color_changed",
+                      GTK_SIGNAL_FUNC(color_changed), (gpointer)ambient_color);
+
+   gimp_rgb_set(&color, diffuse_color[0], diffuse_color[1], diffuse_color[2]);
+   diffuse_color_btn = btn = gimp_color_button_new("Diffuse color", 0, 15, &color, GIMP_COLOR_AREA_FLAT);
+   gtk_widget_show(btn);
+   gimp_color_button_set_color(GIMP_COLOR_BUTTON(btn), &color);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 6, "Diffuse color:", 0, 0.5,
+                             btn, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(btn), "color_changed",
+                      GTK_SIGNAL_FUNC(color_changed), (gpointer)diffuse_color);
+   
+   gimp_rgb_set(&color, specular_color[0], specular_color[1], specular_color[2]);
+   specular_color_btn = btn = gimp_color_button_new("Specular color", 0, 15, &color, GIMP_COLOR_AREA_FLAT);
+   gtk_widget_show(btn);
+   gimp_color_button_set_color(GIMP_COLOR_BUTTON(btn), &color);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 7, "Specular color:", 0, 0.5,
+                             btn, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(btn), "color_changed",
+                      GTK_SIGNAL_FUNC(color_changed), (gpointer)specular_color);
    
    btn = gtk_button_new_with_label("Reset view");
    gtk_widget_show(btn);
-   gtk_box_pack_start(GTK_BOX(vbox2), btn, 0, 0, 0);
+   gtk_table_attach(GTK_TABLE(table), btn, 0, 2, 8, 9,
+                    (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
+                    (GtkAttachOptions)(0), 0, 0);
    gtk_signal_connect(GTK_OBJECT(btn), "clicked",
                       GTK_SIGNAL_FUNC(reset_view_clicked), 0);
    

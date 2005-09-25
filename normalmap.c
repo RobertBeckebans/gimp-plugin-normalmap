@@ -329,6 +329,7 @@ static void make_heightmap(unsigned char *image, int w, int h, int bpp)
       return;
    }
    
+   /* scale into 0 to 1 range, make signed -1 to 1 */
    for(i = 0; i < num_pixels; ++i)
    {
       s[3 * i + 0] = (((float)image[bpp * i + 0] / 255.0f) - 0.5) * 2.0f;
@@ -340,7 +341,7 @@ static void make_heightmap(unsigned char *image, int w, int h, int bpp)
 
 #define S(x, y, n) s[(y) * (w * 3) + ((x) * 3) + (n)]
 #define R(x, y, n) r[(y) * (w * 4) + ((x) * 4) + (n)]
-
+   
    /* top-left to bottom-right */
    for(x = 1; x < w; ++x)
       R(x, 0, 0) = R(x - 1, 0, 0) + S(x - 1, 0, 0);
@@ -396,7 +397,7 @@ static void make_heightmap(unsigned char *image, int w, int h, int bpp)
                        S(x + 1, y, 0) - S(x, y + 1, 1)) * 0.5f;
       }
    }
-   
+
 #undef S
 #undef R
 
@@ -414,7 +415,7 @@ static void make_heightmap(unsigned char *image, int w, int h, int bpp)
    for(i = 0; i < num_pixels; ++i)
    {   
       v = (r[4 * i] - hmin) / (hmax - hmin);
-      /* contrast */
+      /* adjust contrast */
       v = (v - 0.5f) * nmapvals.contrast + v;
       if(v < 0) v = 0;
       if(v > 1) v = 1;
