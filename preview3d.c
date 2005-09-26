@@ -1107,7 +1107,7 @@ void show_3D_preview(GimpDrawable *drawable)
 
    window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
    gtk_window_set_title(GTK_WINDOW(window), "Normalmap - 3D Preview");
-   gtk_container_set_resize_mode(GTK_CONTAINER(window), GTK_RESIZE_IMMEDIATE);
+   gtk_container_set_resize_mode(GTK_CONTAINER(window), GTK_RESIZE_QUEUE);
    gtk_container_set_reallocate_redraws(GTK_CONTAINER(window), TRUE);
    gtk_signal_connect(GTK_OBJECT(window), "destroy",
                       GTK_SIGNAL_FUNC(window_destroy), 0);
