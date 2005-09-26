@@ -19,7 +19,6 @@
 	Boston, MA 02111-1307, USA.
 */
 
-
 #include <string.h>
 #include <math.h>
 #include <ctype.h>
@@ -38,9 +37,8 @@ static int _gl_error = 0;
 static gint32 normalmap_drawable_id = -1;
 static GtkWidget *window = 0;
 static GtkWidget *glarea = 0;
-static GtkWidget *normal_radio = 0;
-static GtkWidget *parallax_radio = 0;
-static GtkWidget *relief_radio = 0;
+static GtkWidget *bumpmapping_opt = 0;
+static GtkWidget *bumpmapping_relief_item = 0;
 static GtkWidget *specular_check = 0;
 static GtkWidget *gloss_opt = 0;
 static GtkWidget *specular_exp_range = 0;
@@ -58,71 +56,14 @@ static const float anisotropy = 4.0f;
 static int has_glsl = 0;
 static int has_npot = 0;
 
+static int tex_indirections = 0;
+
+static GLhandleARB normal_prog = 0;
 static GLhandleARB parallax_prog = 0;
 static GLhandleARB relief_prog = 0;
+static GLhandleARB pom_prog = 0;
 
-static const char *parallax_vert_source =
-   "varying vec2 tex;\n"
-   "varying vec3 eyeVec;\n"
-   "varying vec3 lightVec;\n"
-   
-   "uniform vec3 eyePos;\n"
-   "uniform vec3 lightDir;\n\n"
-   
-   "void main()\n"
-   "{\n"
-   "   gl_Position = ftransform();\n"
-   "   tex = gl_MultiTexCoord0.xy;\n"
-   "   mat3 TBN;\n"
-   "   TBN[0] = gl_MultiTexCoord3.xyz * gl_NormalMatrix;\n"
-   "   TBN[1] = gl_MultiTexCoord4.xyz * gl_NormalMatrix;\n"
-   "   TBN[2] = gl_Normal * gl_NormalMatrix;\n"
-   "   lightVec = lightDir * TBN;\n"
-   "   eyeVec = (eyePos - gl_Vertex.xyz) * TBN;\n"
-   "}\n";
-static const char *parallax_frag_source =
-   "varying vec2 tex;\n"
-   "varying vec3 eyeVec;\n"
-   "varying vec3 lightVec;\n"
-   
-   "uniform sampler2D sNormal;\n"
-   "uniform sampler2D sDiffuse;\n"
-   "uniform sampler2D sGloss;\n\n"
-   
-   "uniform vec3 lightDir;\n"
-   "uniform bool parallax;\n"
-   "uniform bool specular;\n"
-   "uniform float specular_exp;\n"
-   "uniform vec3 ambient_color;\n"
-   "uniform vec3 diffuse_color;\n"
-   "uniform vec3 specular_color;\n\n"
-      
-   "void main()\n"
-   "{\n"
-   "   vec3 V = normalize(eyeVec);\n"
-   "   vec3 L = normalize(lightVec);\n"
-   "   vec2 tc = tex;\n"
-   "   if(parallax)\n"
-   "   {\n"
-   "      float height = texture2D(sNormal, tex).a;\n"
-   "      height = height * 0.04 - 0.02;\n"
-   "      tc += (V.xy * height);\n"
-   "   }\n"
-   "   vec3 N = normalize(texture2D(sNormal, tc).rgb * 2.0 - 1.0);\n"
-   "   vec3 diffuse = texture2D(sDiffuse, tc).rgb;\n"
-   "   float NdotL = clamp(dot(N, L), 0.0, 1.0);\n"
-   "   vec3 color = diffuse * diffuse_color * NdotL;\n"
-   "   if(specular)\n"
-   "   {\n"
-   "      vec3 gloss = texture2D(sGloss, tc).rgb;\n"
-   "      vec3 R = reflect(V, N);\n"
-   "      float RdotL = clamp(dot(R, L), 0.0, 1.0);\n"
-   "      color += gloss * specular_color * pow(RdotL, specular_exp);\n"
-   "   }\n"
-   "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
-   "}\n";
-
-static const char *relief_vert_source =
+static const char *vert_source =
    "varying vec2 tex;\n"
    "varying vec3 vpos;\n"
    "varying vec3 normal;\n"
@@ -138,7 +79,83 @@ static const char *relief_vert_source =
    "   tangent  = gl_NormalMatrix * gl_MultiTexCoord3.xyz;\n"
    "   binormal = gl_NormalMatrix * gl_MultiTexCoord4.xyz;\n"
    "}\n";
+
+static const char *normal_frag_source =
+   "varying vec2 tex;\n"
+   "varying vec3 vpos;\n"
+   "varying vec3 normal;\n"
+   "varying vec3 tangent;\n"
+   "varying vec3 binormal;\n"
+   
+   "uniform sampler2D sNormal;\n"
+   "uniform sampler2D sDiffuse;\n"
+   "uniform sampler2D sGloss;\n\n"
+   
+   "uniform vec3 lightDir;\n"
+   "uniform bool specular;\n"
+   "uniform float specular_exp;\n"
+   "uniform vec3 ambient_color;\n"
+   "uniform vec3 diffuse_color;\n"
+   "uniform vec3 specular_color;\n\n"
       
+   "void main()\n"
+   "{\n"
+   "   vec3 V = normalize(vpos);\n"
+   "   vec3 N = texture2D(sNormal, tex).rgb * 2.0 - 1.0;\n"
+   "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
+   "   vec3 diffuse = texture2D(sDiffuse, tex).rgb;\n"
+   "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
+   "   vec3 color = diffuse * diffuse_color * NdotL;\n"
+   "   if(specular)\n"
+   "   {\n"
+   "      vec3 gloss = texture2D(sGloss, tex).rgb;\n"
+   "      vec3 R = reflect(V, N);\n"
+   "      float RdotL = clamp(dot(R, lightDir), 0.0, 1.0);\n"
+   "      color += gloss * specular_color * pow(RdotL, specular_exp);\n"
+   "   }\n"
+   "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
+   "}\n";
+      
+static const char *parallax_frag_source =
+   "varying vec2 tex;\n"
+   "varying vec3 vpos;\n"
+   "varying vec3 normal;\n"
+   "varying vec3 tangent;\n"
+   "varying vec3 binormal;\n"
+   
+   "uniform sampler2D sNormal;\n"
+   "uniform sampler2D sDiffuse;\n"
+   "uniform sampler2D sGloss;\n\n"
+   
+   "uniform vec3 lightDir;\n"
+   "uniform bool specular;\n"
+   "uniform float specular_exp;\n"
+   "uniform vec3 ambient_color;\n"
+   "uniform vec3 diffuse_color;\n"
+   "uniform vec3 specular_color;\n\n"
+      
+   "void main()\n"
+   "{\n"
+   "   mat3 TBN = mat3(tangent, binormal, normal);\n"
+   "   vec3 V = normalize(vpos);\n"
+   "   float height = texture2D(sNormal, tex).a;\n"
+   "   height = height * 0.04 - 0.02;\n"
+   "   tex += (V * TBN).xy * height;\n"
+   "   vec3 N = texture2D(sNormal, tex).rgb * 2.0 - 1.0;\n"
+   "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
+   "   vec3 diffuse = texture2D(sDiffuse, tex).rgb;\n"
+   "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
+   "   vec3 color = diffuse * diffuse_color * NdotL;\n"
+   "   if(specular)\n"
+   "   {\n"
+   "      vec3 gloss = texture2D(sGloss, tex).rgb;\n"
+   "      vec3 R = reflect(V, N);\n"
+   "      float RdotL = clamp(dot(R, lightDir), 0.0, 1.0);\n"
+   "      color += gloss * specular_color * pow(RdotL, specular_exp);\n"
+   "   }\n"
+   "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
+   "}\n";
+
 static const char *relief_frag_source =
    "varying vec2 tex;\n"
    "varying vec3 vpos;\n"
@@ -198,7 +215,7 @@ static const char *relief_frag_source =
    "{\n"
    "\n"
    "   vec3 V = normalize(vpos);\n"
-   "   float a = dot(normal, V);\n"
+   "   float a = dot(normal, -V);\n"
    "   vec2 s = vec2(dot(V, tangent), dot(V, binormal));\n"
    "   s *= depth_factor / a;\n"
    "   vec2 ds = s;\n"
@@ -209,7 +226,109 @@ static const char *relief_frag_source =
    "   vec3 N = texture2D(sNormal, uv).xyz * 2.0 - 1.0;\n"
    "   vec3 diffuse = texture2D(sDiffuse, uv).rgb;\n"
    "\n"
-   "   N = normalize(-N.x * tangent + -N.y * binormal + N.z * normal);\n"
+   "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
+   "\n"
+   "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
+   "\n"
+   "   vec3 color = diffuse * diffuse_color * NdotL;\n"
+   "\n"
+   "   if(specular)\n"
+   "   {\n"
+   "      vec3 gloss = texture2D(sGloss, uv).rgb;\n"
+   "      vec3 R = reflect(V, N);\n"
+   "      float RdotL = clamp(dot(R, lightDir), 0.0, 1.0);\n"
+   "      color += gloss * specular_color * pow(RdotL, specular_exp);\n"
+   "   }\n"
+   "\n"
+   "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
+   "}\n";
+
+static const char *pom_frag_source =
+   "varying vec2 tex;\n"
+   "varying vec3 vpos;\n"
+   "varying vec3 normal;\n"
+   "varying vec3 tangent;\n"
+   "varying vec3 binormal;\n"
+   "\n"
+   "uniform sampler2D sNormal;\n"
+   "uniform sampler2D sDiffuse;\n"
+   "uniform sampler2D sGloss;\n"
+   "\n"
+   "uniform vec3 lightDir;\n"
+   "uniform bool specular;\n"
+   "uniform vec3 ambient_color;\n"
+   "uniform vec3 diffuse_color;\n"
+   "uniform vec3 specular_color;\n"
+   "uniform float specular_exp;\n"
+   "uniform vec2 planes;\n"
+   "uniform float depth_factor;\n"
+   "\n"
+   "void ray_intersect(sampler2D reliefMap, inout vec4 p, inout vec3 v)\n"
+   "{\n"
+   "   const int search_steps = 20;\n"
+   "\n"
+   "   v /= float(search_steps);\n"
+   "\n"
+   "   float4 pp = p;\n"
+   "   for(int i = 0; i < search_steps - 1; ++i)\n"
+   "   {\n"
+   "      p.w = texture2D(reliefMap, p.xy).w;\n"
+   "      if(p.w > p.z)\n"
+   "      {\n"
+   "         pp = p;\n"
+   "         p.xyz += v;\n"
+   "      }\n"
+   "   }\n"
+   "\n"
+   "   float f = (pp.w - pp.z) / (p.z - pp.z - p.w + pp.w);\n"
+   "   p = mix(pp, p, f);\n"
+   "}\n"
+   "\n"
+   "void ray_intersect_ATI(sampler2D reliefMap, inout vec4 p, inout vec3 v)"
+   "{\n"
+   "   float h0 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 1.000).a;\n"
+   "   float h1 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.875).a;\n"
+   "   float h2 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.750).a;\n"
+   "   float h3 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.625).a;\n"
+   "   float h4 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.500).a;\n"
+   "   float h5 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.375).a;\n"
+   "   float h6 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.250).a;\n"
+   "   float h7 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.125).a;\n"
+   "\n"
+   "   float x, y, xh, yh;\n"
+   "   if     (h7 > 0.875) { x = 0.937; y = 0.938; xh = h7; yh = h7; }\n"
+   "   else if(h6 > 0.750) { x = 0.750; y = 0.875; xh = h6; yh = h7; }\n"
+   "   else if(h5 > 0.625) { x = 0.625; y = 0.750; xh = h5; yh = h6; }\n"
+   "   else if(h4 > 0.500) { x = 0.500; y = 0.625; xh = h4; yh = h5; }\n"
+   "   else if(h3 > 0.375) { x = 0.375; y = 0.500; xh = h3; yh = h4; }\n"
+   "   else if(h2 > 0.250) { x = 0.250; y = 0.375; xh = h2; yh = h3; }\n"
+   "   else if(h1 > 0.125) { x = 0.125; y = 0.250; xh = h1; yh = h2; }\n"
+   "   else                { x = 0.000; y = 0.125; xh = h0; yh = h1; }\n"
+   "\n"
+   "   float parallax = (x * (y - yh) - y * (x - xh)) / ((y - yh) - (x - xh));\n"
+   "   p.xyz += v * (1.0 - parallax);\n"
+   "}\n"
+   "\n"
+   "void main()\n"
+   "{\n"
+   "\n"
+   "   vec3 V = normalize(vpos);\n"
+   "   float a = dot(normal, -V);\n"
+   "   vec3 v = vec3(dot(V, tangent), dot(V, binormal), a);\n"
+   "   vec3 scale = vec3(1.0, 1.0, depth_factor);\n"
+   "   v *= scale.z / (scale * v.z);\n"
+   "   vec4 p = vec4(tex, vec2(0.0, 1.0));\n"
+   "#ifdef ATI\n"
+   "   ray_intersect_ATI(sNormal, p, v);\n"
+   "#else\n"
+   "   ray_intersect(sNormal, p, v);\n"
+   "#endif\n"
+   "\n"
+   "   vec2 uv = p.xy;\n"
+   "   vec3 N = texture2D(sNormal, uv).xyz * 2.0 - 1.0;\n"
+   "   vec3 diffuse = texture2D(sDiffuse, uv).rgb;\n"
+   "\n"
+   "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
    "\n"
    "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
    "\n"
@@ -428,43 +547,93 @@ static void init(GtkWidget *widget, gpointer data)
    
    if(has_glsl)
    {
-      GLhandleARB shader;
+      GLhandleARB vert_shader, frag_shader;
       int res, len, loc;
+      const char *sources[2];
       char *info;
+
+      /* Get # of texture indirections supported by the hardware.
+       * Used to determine if relief mapping should be enabled and if the
+       * "ATI" version of parallax occlusion mapping should be used.
+       */
+      if(GLEW_ARB_fragment_program)
+      {
+         GLuint fprog;
+         const char *dummy_fprog = "!!ARBfp1.0\nMOV result.color, fragment.color.primary;\nEND\n";
+         
+         glGenProgramsARB(1, &fprog);
+         glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, fprog);
+         glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB,
+                            strlen(dummy_fprog), dummy_fprog);
+         glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB,
+                           GL_MAX_PROGRAM_NATIVE_TEX_INDIRECTIONS_ARB,
+                           &tex_indirections);
+         glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, 0);
+         glDeleteProgramsARB(1, &fprog);
+      }
+
+      vert_shader = glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB);
+      glShaderSourceARB(vert_shader, 1, &vert_source, 0);
+      glCompileShaderARB(vert_shader);
+      glGetObjectParameterivARB(vert_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+      if(!res)
+      {
+         glGetObjectParameterivARB(vert_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(vert_shader, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
       
+      normal_prog = glCreateProgramObjectARB();
+      glAttachObjectARB(normal_prog, vert_shader);
+      
+      frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+      glShaderSourceARB(frag_shader, 1, &normal_frag_source, 0);
+      glCompileShaderARB(frag_shader);
+      glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+      if(res)
+         glAttachObjectARB(normal_prog, frag_shader);
+      else
+      {
+         glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(frag_shader, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
+      glDeleteObjectARB(frag_shader);
+      
+      glLinkProgramARB(normal_prog);
+      glGetObjectParameterivARB(normal_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+
+      if(!res)
+      {
+         glGetObjectParameterivARB(normal_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(normal_prog, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
+
       parallax_prog = glCreateProgramObjectARB();
+      glAttachObjectARB(parallax_prog, vert_shader);
       
-      shader = glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB);
-      glShaderSourceARB(shader, 1, &parallax_vert_source, 0);
-      glCompileShaderARB(shader);
-      glGetObjectParameterivARB(shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+      frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+      glShaderSourceARB(frag_shader, 1, &parallax_frag_source, 0);
+      glCompileShaderARB(frag_shader);
+      glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
       if(res)
-         glAttachObjectARB(parallax_prog, shader);
+         glAttachObjectARB(parallax_prog, frag_shader);
       else
       {
-         glGetObjectParameterivARB(shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
          info = g_malloc(len + 1);
-         glGetInfoLogARB(shader, len, 0, info);
+         glGetInfoLogARB(frag_shader, len, 0, info);
          g_message(info);
          g_free(info);
       }
-      glDeleteObjectARB(shader);
-      
-      shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
-      glShaderSourceARB(shader, 1, &parallax_frag_source, 0);
-      glCompileShaderARB(shader);
-      glGetObjectParameterivARB(shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
-      if(res)
-         glAttachObjectARB(parallax_prog, shader);
-      else
-      {
-         glGetObjectParameterivARB(shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(shader, len, 0, info);
-         g_message(info);
-         g_free(info);
-      }
-      glDeleteObjectARB(shader);
+      glDeleteObjectARB(frag_shader);
       
       glLinkProgramARB(parallax_prog);
       glGetObjectParameterivARB(parallax_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
@@ -473,44 +642,29 @@ static void init(GtkWidget *widget, gpointer data)
       {
          glGetObjectParameterivARB(parallax_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
          info = g_malloc(len + 1);
-         glGetInfoLogARB(shader, len, 0, info);
+         glGetInfoLogARB(parallax_prog, len, 0, info);
          g_message(info);
          g_free(info);
       }
-
+      
       relief_prog = glCreateProgramObjectARB();
+      glAttachObjectARB(relief_prog, vert_shader);
       
-      shader = glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB);
-      glShaderSourceARB(shader, 1, &relief_vert_source, 0);
-      glCompileShaderARB(shader);
-      glGetObjectParameterivARB(shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+      frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+      glShaderSourceARB(frag_shader, 1, &relief_frag_source, 0);
+      glCompileShaderARB(frag_shader);
+      glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
       if(res)
-         glAttachObjectARB(relief_prog, shader);
+         glAttachObjectARB(relief_prog, frag_shader);
       else
       {
-         glGetObjectParameterivARB(shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
          info = g_malloc(len + 1);
-         glGetInfoLogARB(shader, len, 0, info);
+         glGetInfoLogARB(frag_shader, len, 0, info);
          g_message(info);
          g_free(info);
       }
-      glDeleteObjectARB(shader);
-      
-      shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
-      glShaderSourceARB(shader, 1, &relief_frag_source, 0);
-      glCompileShaderARB(shader);
-      glGetObjectParameterivARB(shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
-      if(res)
-         glAttachObjectARB(relief_prog, shader);
-      else
-      {
-         glGetObjectParameterivARB(shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(shader, len, 0, info);
-         g_message(info);
-         g_free(info);
-      }
-      glDeleteObjectARB(shader);
+      glDeleteObjectARB(frag_shader);
       
       glLinkProgramARB(relief_prog);
       glGetObjectParameterivARB(relief_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
@@ -519,10 +673,60 @@ static void init(GtkWidget *widget, gpointer data)
       {
          glGetObjectParameterivARB(relief_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
          info = g_malloc(len + 1);
-         glGetInfoLogARB(shader, len, 0, info);
+         glGetInfoLogARB(relief_prog, len, 0, info);
          g_message(info);
          g_free(info);
       }
+
+      pom_prog = glCreateProgramObjectARB();
+      glAttachObjectARB(pom_prog, vert_shader);
+      
+      if(tex_indirections < 100)
+         sources[0] = "#define ATI 1\n";
+      else
+         sources[0] = "";
+      
+      sources[1] = pom_frag_source;
+      
+      frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+      glShaderSourceARB(frag_shader, 2, sources, 0);
+      glCompileShaderARB(frag_shader);
+      glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+      if(res)
+         glAttachObjectARB(pom_prog, frag_shader);
+      else
+      {
+         glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(frag_shader, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
+      glDeleteObjectARB(frag_shader);
+      
+      glLinkProgramARB(pom_prog);
+      glGetObjectParameterivARB(pom_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+
+      if(!res)
+      {
+         glGetObjectParameterivARB(pom_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+         info = g_malloc(len + 1);
+         glGetInfoLogARB(pom_prog, len, 0, info);
+         g_message(info);
+         g_free(info);
+      }
+      
+      glDeleteObjectARB(vert_shader);
+
+      glUseProgramObjectARB(normal_prog);
+      loc = glGetUniformLocationARB(normal_prog, "sNormal");
+      glUniform1iARB(loc, 0);
+      loc = glGetUniformLocationARB(normal_prog, "sDiffuse");
+      glUniform1iARB(loc, 1);
+      loc = glGetUniformLocationARB(normal_prog, "sGloss");
+      glUniform1iARB(loc, 2);
+      loc = glGetUniformLocationARB(normal_prog, "lightDir");
+      glUniform3fARB(loc, 0, 0, 1);
       
       glUseProgramObjectARB(parallax_prog);
       loc = glGetUniformLocationARB(parallax_prog, "sNormal");
@@ -545,19 +749,33 @@ static void init(GtkWidget *widget, gpointer data)
       glUniform3fvARB(loc, 1, light_dir);
       loc = glGetUniformLocationARB(relief_prog, "depth_factor");
       glUniform1fARB(loc, 0.05f);
-      loc = glGetUniformLocationARB(relief_prog, "planes");
-      glUniform2fARB(loc,
-                     -100.0f / (100.0f - 0.1f),
-                     -100.0f * 0.1f / (100.0f - 0.1f));
-         
+
+      glUseProgramObjectARB(pom_prog);
+      loc = glGetUniformLocationARB(pom_prog, "sNormal");
+      glUniform1iARB(loc, 0);
+      loc = glGetUniformLocationARB(pom_prog, "sDiffuse");
+      glUniform1iARB(loc, 1);
+      loc = glGetUniformLocationARB(pom_prog, "sGloss");
+      glUniform1iARB(loc, 2);
+      loc = glGetUniformLocationARB(pom_prog, "lightDir");
+      glUniform3fvARB(loc, 1, light_dir);
+      loc = glGetUniformLocationARB(pom_prog, "depth_factor");
+      glUniform1fARB(loc, 0.05f);
+      
       glUseProgramObjectARB(0);
+      
+      if(tex_indirections < 100)
+         gtk_widget_set_sensitive(bumpmapping_relief_item, 0);
    }
    else
    {
-      gtk_widget_set_sensitive(parallax_radio, 0);
-      gtk_widget_set_sensitive(relief_radio, 0);
-      gtk_widget_set_sensitive(specular_check, 0);
       gtk_widget_set_sensitive(gloss_opt, 0);
+      gtk_widget_set_sensitive(bumpmapping_opt, 0);
+      gtk_widget_set_sensitive(specular_check, 0);
+      gtk_widget_set_sensitive(specular_exp_range, 0);
+      gtk_widget_set_sensitive(ambient_color_btn, 0);
+      gtk_widget_set_sensitive(diffuse_color_btn, 0);
+      gtk_widget_set_sensitive(specular_color_btn, 0);
    }
 
    rot[0] = rot[1] = rot[2] = 0;
@@ -622,13 +840,15 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    
    if(has_glsl)
    {
-      prog = bumpmapping == 2 ? relief_prog : parallax_prog;
+      switch(bumpmapping)
+      {
+         case 0: prog = normal_prog;   break;
+         case 1: prog = parallax_prog; break;
+         case 2: prog = pom_prog;      break;
+         case 3: prog = relief_prog;   break;
+      }
 
       glUseProgramObjectARB(prog);
-      loc = glGetUniformLocationARB(prog, "eyePos");
-      glUniform3fARB(loc, 0, 0, -zoom);
-      loc = glGetUniformLocationARB(prog, "parallax");
-      glUniform1iARB(loc, bumpmapping == 1);
       loc = glGetUniformLocationARB(prog, "specular");
       glUniform1iARB(loc, specular);
       loc = glGetUniformLocationARB(prog, "ambient_color");
@@ -641,10 +861,11 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
       glUniform1fARB(loc, specular_exp);
    }
 
+   glMultiTexCoord3f(GL_TEXTURE3, 1, 0, 0);
+   glMultiTexCoord3f(GL_TEXTURE4, 0, -1, 0);
+   
    glBegin(GL_TRIANGLE_STRIP);
    {
-      glMultiTexCoord3f(GL_TEXTURE3, -1, 0, 0);
-      glMultiTexCoord3f(GL_TEXTURE4, 0, 1, 0);
       glNormal3f(0, 0, 1);
       
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
@@ -676,8 +897,6 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
 
    glBegin(GL_TRIANGLE_STRIP);
    {
-      glMultiTexCoord3f(GL_TEXTURE3, -1, 0, 0);
-      glMultiTexCoord3f(GL_TEXTURE4, 0, -1, 0);
       glNormal3f(0, 0, -1);
 
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
@@ -818,14 +1037,6 @@ static void window_destroy(GtkWidget *widget, gpointer data)
 {
    gtk_widget_destroy(glarea);
    _active = 0;
-}
-
-static gint dialog_constrain(gint32 image_id, gint32 drawable_id,
-                             gpointer data)
-{
-   if(drawable_id == -1) return(1);
-   //return(gimp_drawable_is_rgb(drawable_id));
-   return(1);
 }
 
 static void diffusemap_callback(gint32 id, gpointer data)
@@ -1010,11 +1221,8 @@ static void glossmap_callback(gint32 id, gpointer data)
 
 static void bumpmapping_clicked(GtkWidget *widget, gpointer data)
 {
-   if(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget)))
-   {
-      bumpmapping = (int)data;
-      gtk_widget_queue_draw(glarea);
-   }
+   bumpmapping = (int)data;
+   gtk_widget_queue_draw(glarea);
 }
 
 static void toggle_clicked(GtkWidget *widget, gpointer data)
@@ -1054,7 +1262,7 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
    diffuse_color[0] = diffuse_color[1] = diffuse_color[2] = 1.0f;
    specular_color[0] = specular_color[1] = specular_color[2] = 1.0f;
    
-   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(normal_radio), 1);
+   gtk_option_menu_set_history(GTK_OPTION_MENU(bumpmapping_opt), 0);
    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(specular_check), 0);
    gtk_range_set_value(GTK_RANGE(specular_exp_range), specular_exp);
    
@@ -1073,16 +1281,15 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
 
 void show_3D_preview(GimpDrawable *drawable)
 {
-   GtkWidget *vbox, *hbox;
+   GtkWidget *vbox;
    GtkWidget *table;
    GtkWidget *opt;
    GtkWidget *menu;
-   GtkWidget *radio;
+   GtkWidget *menuitem;
    GtkWidget *check;
    GtkWidget *btn;
    GtkWidget *hscale;
    GdkGLConfig *glconfig;
-   GSList *group = 0;
    GimpRGB color;
    
    bumpmapping = 0;
@@ -1146,57 +1353,63 @@ void show_3D_preview(GimpDrawable *drawable)
    
    opt = gtk_option_menu_new();
    gtk_widget_show(opt);
-   menu = gimp_drawable_menu_new(dialog_constrain,
-                                 diffusemap_callback,
-                                 0, normalmap_drawable_id);
+   menu = gimp_drawable_menu_new(0, diffusemap_callback, 0, normalmap_drawable_id);
    gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
    gimp_table_attach_aligned(GTK_TABLE(table), 0, 0, "Diffuse map:", 0, 0.5,
                              opt, 1, 0);
    
-   gloss_opt = opt = gtk_option_menu_new();
+   opt = gtk_option_menu_new();
+   gloss_opt = opt;
    gtk_widget_show(opt);
-   menu = gimp_drawable_menu_new(dialog_constrain,
-                                 glossmap_callback,
-                                 0, normalmap_drawable_id);
+   menu = gimp_drawable_menu_new(0, glossmap_callback, 0, normalmap_drawable_id);
    gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
    gimp_table_attach_aligned(GTK_TABLE(table), 0, 1, "Gloss map:", 0, 0.5,
                              opt, 1, 0);
    
-   hbox = gtk_hbox_new(0, 0);
-   gtk_box_set_spacing(GTK_BOX(hbox), 5);
-   gtk_widget_show(hbox);
+   opt = gtk_option_menu_new();
+   bumpmapping_opt = opt;
+   gtk_widget_show(opt);
    
    gimp_table_attach_aligned(GTK_TABLE(table), 0, 2,
                              "Bump mapping:", 0, 0.5,
-                             hbox, 1, 0);
+                             opt, 1, 0);
    
-   normal_radio = radio = gtk_radio_button_new_with_label(group, "Normal");
-   gtk_widget_show(radio);
-   gtk_box_pack_start(GTK_BOX(hbox), radio, 0, 0, 0);
-   gtk_signal_connect(GTK_OBJECT(radio), "clicked",
-                      GTK_SIGNAL_FUNC(bumpmapping_clicked), (gpointer)0);
-   group = gtk_radio_button_get_group(GTK_RADIO_BUTTON(radio));
+   menu = gtk_menu_new();
+	menuitem = gtk_menu_item_new_with_label("Normal");
+	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
+							 (gpointer)0);
+	gtk_widget_show(menuitem);
+	gtk_menu_append(GTK_MENU(menu), menuitem);
+	menuitem = gtk_menu_item_new_with_label("Parallax");
+	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
+							 (gpointer)1);
+	gtk_widget_show(menuitem);
+	gtk_menu_append(GTK_MENU(menu), menuitem);
+	menuitem = gtk_menu_item_new_with_label("Parallax occlusion");
+	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
+							 (gpointer)2);
+	gtk_widget_show(menuitem);
+	gtk_menu_append(GTK_MENU(menu), menuitem);
+	menuitem = gtk_menu_item_new_with_label("Relief");
+   bumpmapping_relief_item = menuitem;
+	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
+							 (gpointer)3);
+	gtk_widget_show(menuitem);
+	gtk_menu_append(GTK_MENU(menu), menuitem);
    
-   parallax_radio = radio = gtk_radio_button_new_with_label(group, "Parallax");
-   gtk_widget_show(radio);
-   gtk_box_pack_start(GTK_BOX(hbox), radio, 0, 0, 0);
-   gtk_signal_connect(GTK_OBJECT(radio), "clicked",
-                      GTK_SIGNAL_FUNC(bumpmapping_clicked), (gpointer)1);
-   group = gtk_radio_button_get_group(GTK_RADIO_BUTTON(radio));
+	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
    
-   relief_radio = radio = gtk_radio_button_new_with_label(group, "Relief");
-   gtk_widget_show(radio);
-   gtk_box_pack_start(GTK_BOX(hbox), radio, 0, 0, 0);
-   gtk_signal_connect(GTK_OBJECT(radio), "clicked",
-                      GTK_SIGNAL_FUNC(bumpmapping_clicked), (gpointer)2);
-   group = gtk_radio_button_get_group(GTK_RADIO_BUTTON(radio));
-
-   specular_check = check = gtk_check_button_new_with_label("Specular lighting");
+   check = gtk_check_button_new_with_label("Specular lighting");
+   specular_check = check;
    gtk_widget_show(check);
    gimp_table_attach_aligned(GTK_TABLE(table), 0, 3, "", 0, 0.5, check, 1, 0);
    gtk_signal_connect(GTK_OBJECT(check), "clicked",
                       GTK_SIGNAL_FUNC(toggle_clicked), &specular);
-
+   
    specular_exp_range = hscale = gtk_hscale_new(GTK_ADJUSTMENT(gtk_adjustment_new(32, 0, 256, 1, 8, 0)));
    gtk_widget_show(hscale);
    gtk_scale_set_value_pos(GTK_SCALE(hscale), GTK_POS_RIGHT);

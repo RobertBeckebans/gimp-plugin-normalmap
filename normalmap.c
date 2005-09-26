@@ -1145,7 +1145,7 @@ static void wrap_mode_selected(GtkWidget *widget, gpointer data)
 
 static void height_source_selected(GtkWidget *widget, gpointer data)
 {
-   GtkWidget *opt, *menu;
+   GtkWidget *opt;
    
    if(nmapvals.height_source == (gint)data) return;
    
@@ -1159,8 +1159,7 @@ static void height_source_selected(GtkWidget *widget, gpointer data)
    else
    {
       nmapvals.conversion = CONVERT_NONE;
-      menu = gtk_option_menu_get_menu(GTK_OPTION_MENU(opt));
-      gtk_menu_set_active(GTK_MENU(menu), nmapvals.conversion);
+      gtk_option_menu_set_history(GTK_OPTION_MENU(opt), nmapvals.conversion);
       gtk_widget_set_sensitive(opt, 0);
    }
       
@@ -1203,14 +1202,14 @@ static void preview_clicked(GtkWidget *widget, gpointer data)
 static void dudv_selected(GtkWidget *widget, gpointer data)
 {
    GimpDrawable *drawable;
-   GtkWidget *opt, *menu;
+   GtkWidget *opt;
    
    if(nmapvals.dudv == (gint)data) return;
    
 	nmapvals.dudv = (gint)data;
    
    drawable = g_object_get_data(G_OBJECT(widget), "drawable");
-   opt=g_object_get_data(G_OBJECT(widget), "alpha_opt");
+   opt = g_object_get_data(G_OBJECT(widget), "alpha_opt");
 
    if(nmapvals.dudv == DUDV_NONE)
    {
@@ -1220,8 +1219,7 @@ static void dudv_selected(GtkWidget *widget, gpointer data)
    else
    {
       nmapvals.alpha = 0;
-      menu = gtk_option_menu_get_menu(GTK_OPTION_MENU(opt));
-      gtk_menu_set_active(GTK_MENU(menu), nmapvals.alpha);
+      gtk_option_menu_set_history(GTK_OPTION_MENU(opt), nmapvals.alpha);
       gtk_widget_set_sensitive(opt, 0);
    }
       
