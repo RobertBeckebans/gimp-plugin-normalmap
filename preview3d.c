@@ -140,15 +140,15 @@ static const char *parallax_frag_source =
    "   vec3 V = normalize(vpos);\n"
    "   float height = texture2D(sNormal, tex).a;\n"
    "   height = height * 0.05 - 0.025;\n"
-   "   tex += (V * TBN).xy * height;\n"
-   "   vec3 N = texture2D(sNormal, tex).rgb * 2.0 - 1.0;\n"
+   "   vec2 tc = tex + (V * TBN).xy * height;\n"
+   "   vec3 N = texture2D(sNormal, tc).rgb * 2.0 - 1.0;\n"
    "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
-   "   vec3 diffuse = texture2D(sDiffuse, tex).rgb;\n"
+   "   vec3 diffuse = texture2D(sDiffuse, tc).rgb;\n"
    "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
    "   vec3 color = diffuse * diffuse_color * NdotL;\n"
    "   if(specular)\n"
    "   {\n"
-   "      vec3 gloss = texture2D(sGloss, tex).rgb;\n"
+   "      vec3 gloss = texture2D(sGloss, tc).rgb;\n"
    "      vec3 R = reflect(V, N);\n"
    "      float RdotL = clamp(dot(R, lightDir), 0.0, 1.0);\n"
    "      color += gloss * specular_color * pow(RdotL, specular_exp);\n"
@@ -674,10 +674,10 @@ static void init(GtkWidget *widget, gpointer data)
       pom_prog = glCreateProgramObjectARB();
       glAttachObjectARB(pom_prog, vert_shader);
       
-      //if(tex_indirections < 100)
+      if(tex_indirections < 100)
          sources[0] = "#define ATI 1\n";
-      //else
-      //   sources[0] = "";
+      else
+         sources[0] = "";
       
       sources[1] = pom_frag_source;
       
