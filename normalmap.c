@@ -1134,15 +1134,6 @@ static void scale_changed(GtkWidget *widget, gpointer data)
    update_preview = 1;
 }
 
-static void wrap_mode_selected(GtkWidget *widget, gpointer data)
-{
-   if(nmapvals.wrap != (gint)data)
-   {
-      nmapvals.wrap = (gint)data;
-      update_preview = 1;
-   }
-}
-
 static void height_source_selected(GtkWidget *widget, gpointer data)
 {
    GtkWidget *opt;
@@ -1372,21 +1363,13 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 	gtk_table_set_row_spacings(GTK_TABLE(table), 8);
 	gtk_table_set_col_spacings(GTK_TABLE(table), 8);
 	
-	label = gtk_label_new("Filter:");
-	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 0, 1,
-						  (GtkAttachOptions)(GTK_FILL),
-						  (GtkAttachOptions)(0), 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-	
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 0, 1,
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
-						  (GtkAttachOptions)(0), 0, 0);
-	
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 0, "Filter:", 0, 0.5,
+                             opt, 1, 0);
+
 	menu = gtk_menu_new();
-	
+
 	menuitem = gtk_menu_item_new_with_label("4 sample");
 	gtk_signal_connect(GTK_OBJECT(menuitem), "activate",
 							 GTK_SIGNAL_FUNC(filter_type_selected),
@@ -1444,85 +1427,31 @@ static gint normalmap_dialog(GimpDrawable *drawable)
 	gtk_menu_set_active(GTK_MENU(menu), nmapvals.filter);
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
    
-   label = gtk_label_new("Minimum Z:");
-   gtk_widget_show(label);
-   gtk_table_attach(GTK_TABLE(table), label, 0, 1, 1, 2,
-                    (GtkAttachOptions)(GTK_FILL),
-                    (GtkAttachOptions)(0), 0, 0);
-   gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-
    adj = gtk_adjustment_new(nmapvals.minz, 0, 1, 0.01, 0.05, 0.1);
    spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.01, 5);
+   gtk_widget_show(spin);
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
    gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
                       GTK_SIGNAL_FUNC(minz_changed), spin);
-	gtk_table_attach(GTK_TABLE(table), spin, 1, 2, 1, 2,
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
-						  (GtkAttachOptions)(0), 0, 0);
-   gtk_widget_show(spin);
-   
-	label = gtk_label_new("Scale:");
-	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 2, 3,
-						  (GtkAttachOptions)(GTK_FILL),
-						  (GtkAttachOptions)(0), 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-   
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 1, "Minimum Z:", 0, 0.5,
+                             spin, 1, 0);
+
    adj = gtk_adjustment_new(nmapvals.scale, -100, 100, 1, 5, 5);
    spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 1, 5);
+   gtk_widget_show(spin);
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
    gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
                       GTK_SIGNAL_FUNC(scale_changed), spin);
-	gtk_table_attach(GTK_TABLE(table), spin, 1, 2, 2, 3,
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
-						  (GtkAttachOptions)(0), 0, 0);
-   gtk_widget_show(spin);
-   
-	label = gtk_label_new("Wrap:");
-	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 3, 4,
-						  (GtkAttachOptions)(GTK_FILL), 
-						  (GtkAttachOptions)(0), 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-	
-	opt = gtk_option_menu_new();
-	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 3, 4, 
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
-						  (GtkAttachOptions)(0), 0, 0);
-	
-	menu = gtk_menu_new();
-	
-	menuitem = gtk_menu_item_new_with_label("No");
-	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
-							 GTK_SIGNAL_FUNC(wrap_mode_selected), 
-							 (gpointer)0);
-	gtk_widget_show(menuitem);
-	gtk_menu_append(GTK_MENU(menu), menuitem);
-	menuitem = gtk_menu_item_new_with_label("Yes");
-	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
-							 GTK_SIGNAL_FUNC(wrap_mode_selected), 
-							 (gpointer)1);
-	gtk_widget_show(menuitem);
-	gtk_menu_append(GTK_MENU(menu), menuitem);
-	gtk_menu_set_active(GTK_MENU(menu), nmapvals.wrap);
-	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 2, "Scale:", 0, 0.5,
+                             spin, 1, 0);
 
-	label = gtk_label_new("Height source:");
-	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 4, 5, 
-						  (GtkAttachOptions)(GTK_FILL), 
-						  (GtkAttachOptions)(0), 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-	
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 4, 5, 
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
-						  (GtkAttachOptions)(0), 0, 0);
-	
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 3, "Height source:", 0, 0.5,
+                             opt, 1, 0);
+
 	menu = gtk_menu_new();
-   
+
    if(drawable->bpp != 4)
       nmapvals.height_source = 0;
 	
@@ -1545,19 +1474,11 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    if(drawable->bpp != 4)
       gtk_widget_set_sensitive(opt, 0);
    
-	label = gtk_label_new("Alpha channel:");
-	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 5, 6, 
-						  (GtkAttachOptions)(GTK_FILL), 
-						  (GtkAttachOptions)(0), 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-	
 	opt = alpha_result_opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 5, 6, 
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
-						  (GtkAttachOptions)(0), 0, 0);
-   
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 4, "Alpha channel:", 0, 0.5,
+                             opt, 1, 0);
+
    if(drawable->bpp != 4)
       nmapvals.alpha = 0;
       
@@ -1619,19 +1540,11 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    if(drawable->bpp !=4 || nmapvals.dudv != DUDV_NONE)
       gtk_widget_set_sensitive(opt, 0);
 
-	label = gtk_label_new("Conversion:");
-	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 6, 7, 
-						  (GtkAttachOptions)(GTK_FILL), 
-						  (GtkAttachOptions)(0), 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-	
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 6, 7, 
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
-						  (GtkAttachOptions)(0), 0, 0);
-   
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 5, "Conversion:", 0, 0.5,
+                             opt, 1, 0);
+
    g_object_set_data(G_OBJECT(item_height_source[0]), "conversion_opt", opt);
    g_object_set_data(G_OBJECT(item_height_source[1]), "conversion_opt", opt);
    
@@ -1703,20 +1616,12 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    
    if(nmapvals.height_source)
       gtk_widget_set_sensitive(opt, 0);
- 
-	label = gtk_label_new("DU/DV map:");
-	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 7, 8, 
-						  (GtkAttachOptions)(GTK_FILL), 
-						  (GtkAttachOptions)(0), 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-	
+
 	opt = gtk_option_menu_new();
 	gtk_widget_show(opt);
-	gtk_table_attach(GTK_TABLE(table), opt, 1, 2, 7, 8, 
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND), 
-						  (GtkAttachOptions)(0), 0, 0);
-   
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 6, "DU/DV map:", 0, 0.5,
+                             opt, 1, 0);
+
    if(drawable->bpp != 4 && (nmapvals.dudv == DUDV_16BIT_SIGNED ||
                              nmapvals.dudv == DUDV_16BIT_UNSIGNED))
       nmapvals.dudv = DUDV_NONE;
@@ -1771,23 +1676,15 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_menu_set_active(GTK_MENU(menu), nmapvals.dudv);
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
 
-   label = gtk_label_new("Contrast:");
-   gtk_widget_show(label);
-   gtk_table_attach(GTK_TABLE(table), label, 0, 1, 8, 9,
-                    (GtkAttachOptions)(GTK_FILL),
-                    (GtkAttachOptions)(0), 0, 0);
-   gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
-
    adj = gtk_adjustment_new(nmapvals.contrast, 0, 1, 0.01, 0.05, 0.1);
    spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.01, 5);
+   gtk_widget_show(spin);
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
    gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
                       GTK_SIGNAL_FUNC(contrast_changed), spin);
-	gtk_table_attach(GTK_TABLE(table), spin, 1, 2, 8, 9,
-						  (GtkAttachOptions)(GTK_FILL | GTK_EXPAND),
-						  (GtkAttachOptions)(0), 0, 0);
-   gtk_widget_show(spin);
-   
+	gimp_table_attach_aligned(GTK_TABLE(table), 0, 7, "Contrast:", 0, 0.5,
+                             spin, 1, 0);
+
    gtk_widget_set_sensitive(spin, nmapvals.conversion == CONVERT_HEIGHTMAP);
 
    curr = gtk_container_get_children(GTK_CONTAINER(conversion_menu));
@@ -1805,7 +1702,13 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_widget_show(vbox);
    gtk_container_set_border_width(GTK_CONTAINER(vbox), 4);
    gtk_container_add(GTK_CONTAINER(frame), vbox);
-   
+
+   check = gtk_check_button_new_with_label("Wrap");
+   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), nmapvals.wrap);
+   gtk_widget_show(check);
+   gtk_box_pack_start(GTK_BOX(vbox), check, 0, 1, 0);
+   gtk_signal_connect(GTK_OBJECT(check), "clicked",
+                      GTK_SIGNAL_FUNC(toggle_clicked), &nmapvals.wrap);
    check = gtk_check_button_new_with_label("Invert X");
    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), nmapvals.xinvert);
    gtk_widget_show(check);

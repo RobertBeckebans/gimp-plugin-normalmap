@@ -139,7 +139,7 @@ static const char *parallax_frag_source =
    "   mat3 TBN = mat3(tangent, binormal, normal);\n"
    "   vec3 V = normalize(vpos);\n"
    "   float height = texture2D(sNormal, tex).a;\n"
-   "   height = height * 0.04 - 0.02;\n"
+   "   height = height * 0.05 - 0.025;\n"
    "   tex += (V * TBN).xy * height;\n"
    "   vec3 N = texture2D(sNormal, tex).rgb * 2.0 - 1.0;\n"
    "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
@@ -558,18 +558,11 @@ static void init(GtkWidget *widget, gpointer data)
        */
       if(GLEW_ARB_fragment_program)
       {
-         GLuint fprog;
-         const char *dummy_fprog = "!!ARBfp1.0\nMOV result.color, fragment.color.primary;\nEND\n";
-         
-         glGenProgramsARB(1, &fprog);
-         glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, fprog);
-         glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB,
-                            strlen(dummy_fprog), dummy_fprog);
+         glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, 1);
          glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB,
                            GL_MAX_PROGRAM_NATIVE_TEX_INDIRECTIONS_ARB,
                            &tex_indirections);
          glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, 0);
-         glDeleteProgramsARB(1, &fprog);
       }
 
       vert_shader = glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB);
@@ -681,10 +674,10 @@ static void init(GtkWidget *widget, gpointer data)
       pom_prog = glCreateProgramObjectARB();
       glAttachObjectARB(pom_prog, vert_shader);
       
-      if(tex_indirections < 100)
+      //if(tex_indirections < 100)
          sources[0] = "#define ATI 1\n";
-      else
-         sources[0] = "";
+      //else
+      //   sources[0] = "";
       
       sources[1] = pom_frag_source;
       
@@ -1406,7 +1399,9 @@ void show_3D_preview(GimpDrawable *drawable)
    check = gtk_check_button_new_with_label("Specular lighting");
    specular_check = check;
    gtk_widget_show(check);
-   gimp_table_attach_aligned(GTK_TABLE(table), 0, 3, "", 0, 0.5, check, 1, 0);
+   gtk_table_attach(GTK_TABLE(table), check, 1, 2, 3, 4,
+                    (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
+                    (GtkAttachOptions)(0), 0, 0);
    gtk_signal_connect(GTK_OBJECT(check), "clicked",
                       GTK_SIGNAL_FUNC(toggle_clicked), &specular);
    
