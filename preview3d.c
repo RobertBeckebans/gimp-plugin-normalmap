@@ -32,13 +32,18 @@
 
 #define IS_POT(x)  (((x) & ((x) - 1)) == 0)
 
+typedef enum
+{
+   BUMPMAP_NORMAL = 0, BUMPMAP_PARALLAX, BUMPMAP_POM, BUMPMAP_RELIEF,
+   BUMPMAP_MAX
+} BUMPMAP_TYPE;
+
 static int _active = 0;
 static int _gl_error = 0;
 static gint32 normalmap_drawable_id = -1;
 static GtkWidget *window = 0;
 static GtkWidget *glarea = 0;
 static GtkWidget *bumpmapping_opt = 0;
-static GtkWidget *bumpmapping_relief_item = 0;
 static GtkWidget *specular_check = 0;
 static GtkWidget *gloss_opt = 0;
 static GtkWidget *specular_exp_range = 0;
@@ -56,12 +61,10 @@ static const float anisotropy = 4.0f;
 static int has_glsl = 0;
 static int has_npot = 0;
 
-static int tex_indirections = 0;
+static int max_instructions = 0;
+static int max_indirections = 0;
 
-static GLhandleARB normal_prog = 0;
-static GLhandleARB parallax_prog = 0;
-static GLhandleARB relief_prog = 0;
-static GLhandleARB pom_prog = 0;
+static GLhandleARB programs[BUMPMAP_MAX];
 
 static const char *vert_source =
    "varying vec2 tex;\n"
@@ -156,6 +159,108 @@ static const char *parallax_frag_source =
    "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
    "}\n";
 
+static const char *pom_frag_source =
+   "varying vec2 tex;\n"
+   "varying vec3 vpos;\n"
+   "varying vec3 normal;\n"
+   "varying vec3 tangent;\n"
+   "varying vec3 binormal;\n"
+   "\n"
+   "uniform sampler2D sNormal;\n"
+   "uniform sampler2D sDiffuse;\n"
+   "uniform sampler2D sGloss;\n"
+   "\n"
+   "uniform vec3 lightDir;\n"
+   "uniform bool specular;\n"
+   "uniform vec3 ambient_color;\n"
+   "uniform vec3 diffuse_color;\n"
+   "uniform vec3 specular_color;\n"
+   "uniform float specular_exp;\n"
+   "uniform vec2 planes;\n"
+   "uniform float depth_factor;\n"
+   "\n"
+   "void ray_intersect(sampler2D reliefMap, inout vec4 p, inout vec3 v)\n"
+   "{\n"
+   "   const int search_steps = 20;\n"
+   "\n"
+   "   v /= float(search_steps);\n"
+   "\n"
+   "   vec4 pp = p;\n"
+   "   for(int i = 0; i < search_steps - 1; ++i)\n"
+   "   {\n"
+   "      p.w = texture2D(reliefMap, p.xy).w;\n"
+   "      if(p.w > p.z)\n"
+   "      {\n"
+   "         pp = p;\n"
+   "         p.xyz += v;\n"
+   "      }\n"
+   "   }\n"
+   "\n"
+   "   float f = (pp.w - pp.z) / (p.z - pp.z - p.w + pp.w);\n"
+   "   p = mix(pp, p, f);\n"
+   "}\n"
+   "\n"
+   "void ray_intersect_ATI(sampler2D reliefMap, inout vec4 p, inout vec3 v)"
+   "{\n"
+   "   float h0 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 1.000).a;\n"
+   "   float h1 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.875).a;\n"
+   "   float h2 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.750).a;\n"
+   "   float h3 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.625).a;\n"
+   "   float h4 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.500).a;\n"
+   "   float h5 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.375).a;\n"
+   "   float h6 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.250).a;\n"
+   "   float h7 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.125).a;\n"
+   "\n"
+   "   float x, y, xh, yh;\n"
+   "   if     (h7 > 0.875) { x = 0.937; y = 0.938; xh = h7; yh = h7; }\n"
+   "   else if(h6 > 0.750) { x = 0.750; y = 0.875; xh = h6; yh = h7; }\n"
+   "   else if(h5 > 0.625) { x = 0.625; y = 0.750; xh = h5; yh = h6; }\n"
+   "   else if(h4 > 0.500) { x = 0.500; y = 0.625; xh = h4; yh = h5; }\n"
+   "   else if(h3 > 0.375) { x = 0.375; y = 0.500; xh = h3; yh = h4; }\n"
+   "   else if(h2 > 0.250) { x = 0.250; y = 0.375; xh = h2; yh = h3; }\n"
+   "   else if(h1 > 0.125) { x = 0.125; y = 0.250; xh = h1; yh = h2; }\n"
+   "   else                { x = 0.000; y = 0.125; xh = h0; yh = h1; }\n"
+   "\n"
+   "   float parallax = (x * (y - yh) - y * (x - xh)) / ((y - yh) - (x - xh));\n"
+   "   p.xyz += v * (1.0 - parallax);\n"
+   "}\n"
+   "\n"
+   "void main()\n"
+   "{\n"
+   "\n"
+   "   vec3 V = normalize(vpos);\n"
+   "   float a = dot(normal, -V);\n"
+   "   vec3 v = vec3(dot(V, tangent), dot(V, binormal), a);\n"
+   "   vec3 scale = vec3(1.0, 1.0, depth_factor);\n"
+   "   v *= scale.z / (scale * v.z);\n"
+   "   vec4 p = vec4(tex, vec2(0.0, 1.0));\n"
+   "#ifdef ATI\n"
+   "   ray_intersect_ATI(sNormal, p, v);\n"
+   "#else\n"
+   "   ray_intersect(sNormal, p, v);\n"
+   "#endif\n"
+   "\n"
+   "   vec2 uv = p.xy;\n"
+   "   vec3 N = texture2D(sNormal, uv).xyz * 2.0 - 1.0;\n"
+   "   vec3 diffuse = texture2D(sDiffuse, uv).rgb;\n"
+   "\n"
+   "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
+   "\n"
+   "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
+   "\n"
+   "   vec3 color = diffuse * diffuse_color * NdotL;\n"
+   "\n"
+   "   if(specular)\n"
+   "   {\n"
+   "      vec3 gloss = texture2D(sGloss, uv).rgb;\n"
+   "      vec3 R = reflect(V, N);\n"
+   "      float RdotL = clamp(dot(R, lightDir), 0.0, 1.0);\n"
+   "      color += gloss * specular_color * pow(RdotL, specular_exp);\n"
+   "   }\n"
+   "\n"
+   "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
+   "}\n";
+
 static const char *relief_frag_source =
    "varying vec2 tex;\n"
    "varying vec3 vpos;\n"
@@ -243,109 +348,7 @@ static const char *relief_frag_source =
    "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
    "}\n";
 
-static const char *pom_frag_source =
-   "varying vec2 tex;\n"
-   "varying vec3 vpos;\n"
-   "varying vec3 normal;\n"
-   "varying vec3 tangent;\n"
-   "varying vec3 binormal;\n"
-   "\n"
-   "uniform sampler2D sNormal;\n"
-   "uniform sampler2D sDiffuse;\n"
-   "uniform sampler2D sGloss;\n"
-   "\n"
-   "uniform vec3 lightDir;\n"
-   "uniform bool specular;\n"
-   "uniform vec3 ambient_color;\n"
-   "uniform vec3 diffuse_color;\n"
-   "uniform vec3 specular_color;\n"
-   "uniform float specular_exp;\n"
-   "uniform vec2 planes;\n"
-   "uniform float depth_factor;\n"
-   "\n"
-   "void ray_intersect(sampler2D reliefMap, inout vec4 p, inout vec3 v)\n"
-   "{\n"
-   "   const int search_steps = 20;\n"
-   "\n"
-   "   v /= float(search_steps);\n"
-   "\n"
-   "   float4 pp = p;\n"
-   "   for(int i = 0; i < search_steps - 1; ++i)\n"
-   "   {\n"
-   "      p.w = texture2D(reliefMap, p.xy).w;\n"
-   "      if(p.w > p.z)\n"
-   "      {\n"
-   "         pp = p;\n"
-   "         p.xyz += v;\n"
-   "      }\n"
-   "   }\n"
-   "\n"
-   "   float f = (pp.w - pp.z) / (p.z - pp.z - p.w + pp.w);\n"
-   "   p = mix(pp, p, f);\n"
-   "}\n"
-   "\n"
-   "void ray_intersect_ATI(sampler2D reliefMap, inout vec4 p, inout vec3 v)"
-   "{\n"
-   "   float h0 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 1.000).a;\n"
-   "   float h1 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.875).a;\n"
-   "   float h2 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.750).a;\n"
-   "   float h3 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.625).a;\n"
-   "   float h4 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.500).a;\n"
-   "   float h5 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.375).a;\n"
-   "   float h6 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.250).a;\n"
-   "   float h7 = 1.0 - texture2D(reliefMap, p.xy + v.xy * 0.125).a;\n"
-   "\n"
-   "   float x, y, xh, yh;\n"
-   "   if     (h7 > 0.875) { x = 0.937; y = 0.938; xh = h7; yh = h7; }\n"
-   "   else if(h6 > 0.750) { x = 0.750; y = 0.875; xh = h6; yh = h7; }\n"
-   "   else if(h5 > 0.625) { x = 0.625; y = 0.750; xh = h5; yh = h6; }\n"
-   "   else if(h4 > 0.500) { x = 0.500; y = 0.625; xh = h4; yh = h5; }\n"
-   "   else if(h3 > 0.375) { x = 0.375; y = 0.500; xh = h3; yh = h4; }\n"
-   "   else if(h2 > 0.250) { x = 0.250; y = 0.375; xh = h2; yh = h3; }\n"
-   "   else if(h1 > 0.125) { x = 0.125; y = 0.250; xh = h1; yh = h2; }\n"
-   "   else                { x = 0.000; y = 0.125; xh = h0; yh = h1; }\n"
-   "\n"
-   "   float parallax = (x * (y - yh) - y * (x - xh)) / ((y - yh) - (x - xh));\n"
-   "   p.xyz += v * (1.0 - parallax);\n"
-   "}\n"
-   "\n"
-   "void main()\n"
-   "{\n"
-   "\n"
-   "   vec3 V = normalize(vpos);\n"
-   "   float a = dot(normal, -V);\n"
-   "   vec3 v = vec3(dot(V, tangent), dot(V, binormal), a);\n"
-   "   vec3 scale = vec3(1.0, 1.0, depth_factor);\n"
-   "   v *= scale.z / (scale * v.z);\n"
-   "   vec4 p = vec4(tex, vec2(0.0, 1.0));\n"
-   "#ifdef ATI\n"
-   "   ray_intersect_ATI(sNormal, p, v);\n"
-   "#else\n"
-   "   ray_intersect(sNormal, p, v);\n"
-   "#endif\n"
-   "\n"
-   "   vec2 uv = p.xy;\n"
-   "   vec3 N = texture2D(sNormal, uv).xyz * 2.0 - 1.0;\n"
-   "   vec3 diffuse = texture2D(sDiffuse, uv).rgb;\n"
-   "\n"
-   "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
-   "\n"
-   "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
-   "\n"
-   "   vec3 color = diffuse * diffuse_color * NdotL;\n"
-   "\n"
-   "   if(specular)\n"
-   "   {\n"
-   "      vec3 gloss = texture2D(sGloss, uv).rgb;\n"
-   "      vec3 R = reflect(V, N);\n"
-   "      float RdotL = clamp(dot(R, lightDir), 0.0, 1.0);\n"
-   "      color += gloss * specular_color * pow(RdotL, specular_exp);\n"
-   "   }\n"
-   "\n"
-   "   gl_FragColor.rgb = ambient_color * diffuse + color;\n"
-   "}\n";
-                                                    
-static int bumpmapping = 0;
+static int bumpmapping = BUMPMAP_NORMAL;
 static int specular = 0;
 
 static float ambient_color[3] = {0.1f, 0.1f, 0.1f};
@@ -452,13 +455,15 @@ static int check_NPOT(void)
 
 static void init(GtkWidget *widget, gpointer data)
 {
-   int err;
+   int i, err;
    unsigned char white[16] = {0xff, 0xff, 0xff, 0xff,
                               0xff, 0xff, 0xff, 0xff,
                               0xff, 0xff, 0xff, 0xff,
                               0xff, 0xff, 0xff, 0xff};
    GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
    GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
+   GtkWidget *menu;
+   GList *curr;
 
    if(!gdk_gl_drawable_gl_begin(gldrawable, glcontext))
       return;
@@ -470,6 +475,9 @@ static void init(GtkWidget *widget, gpointer data)
       _gl_error = 1;
    }
 
+   if(!GLEW_VERSION_1_3)
+      g_message("FUCK");
+   
    glClearColor(0, 0, 0.4f, 0);
    glDepthFunc(GL_LEQUAL);
    glEnable(GL_DEPTH_TEST);
@@ -547,21 +555,25 @@ static void init(GtkWidget *widget, gpointer data)
    
    if(has_glsl)
    {
-      GLhandleARB vert_shader, frag_shader;
+      GLhandleARB prog, vert_shader, frag_shader;
       int res, len, loc;
       const char *sources[2];
       char *info;
 
-      /* Get # of texture indirections supported by the hardware.
-       * Used to determine if relief mapping should be enabled and if the
-       * "ATI" version of parallax occlusion mapping should be used.
+      /* Get max # of instructions and indirections supported by the hardware.
+       * Used to determine if parallax occlusion and relief mapping should be
+       * enabled and if the "ATI" version of parallax occlusion mapping should
+       * be used.
        */
       if(GLEW_ARB_fragment_program)
       {
          glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, 1);
          glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB,
+                           GL_MAX_PROGRAM_NATIVE_ALU_INSTRUCTIONS_ARB,
+                           &max_instructions);
+         glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB,
                            GL_MAX_PROGRAM_NATIVE_TEX_INDIRECTIONS_ARB,
-                           &tex_indirections);
+                           &max_indirections);
          glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, 0);
       }
 
@@ -574,191 +586,260 @@ static void init(GtkWidget *widget, gpointer data)
          glGetObjectParameterivARB(vert_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
          info = g_malloc(len + 1);
          glGetInfoLogARB(vert_shader, len, 0, info);
-         g_message(info);
+         g_message("Vertex shader failed to compile:\n%s\n", info);
          g_free(info);
       }
       
-      normal_prog = glCreateProgramObjectARB();
-      glAttachObjectARB(normal_prog, vert_shader);
+      prog = glCreateProgramObjectARB();
+      glAttachObjectARB(prog, vert_shader);
       
       frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
       glShaderSourceARB(frag_shader, 1, &normal_frag_source, 0);
       glCompileShaderARB(frag_shader);
       glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
       if(res)
-         glAttachObjectARB(normal_prog, frag_shader);
+         glAttachObjectARB(prog, frag_shader);
       else
       {
          glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
          info = g_malloc(len + 1);
          glGetInfoLogARB(frag_shader, len, 0, info);
-         g_message(info);
+         g_message("Normal mapping fragment shader failed to compile:\n%s\n",
+                   info);
          g_free(info);
+         glDeleteObjectARB(prog);
+         prog = 0;
       }
       glDeleteObjectARB(frag_shader);
       
-      glLinkProgramARB(normal_prog);
-      glGetObjectParameterivARB(normal_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
-
-      if(!res)
+      if(prog)
       {
-         glGetObjectParameterivARB(normal_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(normal_prog, len, 0, info);
-         g_message(info);
-         g_free(info);
-      }
+         glLinkProgramARB(prog);
+         glGetObjectParameterivARB(prog, GL_OBJECT_LINK_STATUS_ARB, &res);
 
-      parallax_prog = glCreateProgramObjectARB();
-      glAttachObjectARB(parallax_prog, vert_shader);
+         if(!res)
+         {
+            glGetObjectParameterivARB(prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+            info = g_malloc(len + 1);
+            glGetInfoLogARB(prog, len, 0, info);
+            g_message("Normal mapping program failed to link:\n%s\n", info);
+            g_free(info);
+            glDeleteObjectARB(prog);
+            prog = 0;
+         }
+      }
+      
+      programs[BUMPMAP_NORMAL] = prog;
+
+      prog = glCreateProgramObjectARB();
+      glAttachObjectARB(prog, vert_shader);
       
       frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
       glShaderSourceARB(frag_shader, 1, &parallax_frag_source, 0);
       glCompileShaderARB(frag_shader);
       glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
       if(res)
-         glAttachObjectARB(parallax_prog, frag_shader);
+         glAttachObjectARB(prog, frag_shader);
       else
       {
          glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
          info = g_malloc(len + 1);
          glGetInfoLogARB(frag_shader, len, 0, info);
-         g_message(info);
+         g_message("Parallax mapping fragment shader failed to compile:\n%s\n",
+                   info);
          g_free(info);
+         glDeleteObjectARB(prog);
+         prog = 0;
       }
       glDeleteObjectARB(frag_shader);
-      
-      glLinkProgramARB(parallax_prog);
-      glGetObjectParameterivARB(parallax_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
 
-      if(!res)
+      if(prog)
       {
-         glGetObjectParameterivARB(parallax_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(parallax_prog, len, 0, info);
-         g_message(info);
-         g_free(info);
+         glLinkProgramARB(prog);
+         glGetObjectParameterivARB(prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+         
+         if(!res)
+         {
+            glGetObjectParameterivARB(prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+            info = g_malloc(len + 1);
+            glGetInfoLogARB(prog, len, 0, info);
+            g_message("Parallax mapping program failed to link:\n%s\n", info);
+            g_free(info);
+            glDeleteObjectARB(prog);
+            prog = 0;
+         }
       }
       
-      relief_prog = glCreateProgramObjectARB();
-      glAttachObjectARB(relief_prog, vert_shader);
+      programs[BUMPMAP_PARALLAX] = prog;
+
+      if(max_instructions >= 200)
+      {
+         prog = glCreateProgramObjectARB();
+         glAttachObjectARB(prog, vert_shader);
       
-      frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
-      glShaderSourceARB(frag_shader, 1, &relief_frag_source, 0);
-      glCompileShaderARB(frag_shader);
-      glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
-      if(res)
-         glAttachObjectARB(relief_prog, frag_shader);
+         if(max_indirections < 100)
+            sources[0] = "#define ATI 1\n";
+         else
+            sources[0] = "";
+         
+         sources[1] = pom_frag_source;
+      
+         frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+         glShaderSourceARB(frag_shader, 2, sources, 0);
+         glCompileShaderARB(frag_shader);
+         glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+         if(res)
+            glAttachObjectARB(prog, frag_shader);
+         else
+         {
+            glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+            info = g_malloc(len + 1);
+            glGetInfoLogARB(frag_shader, len, 0, info);
+            g_message("Parallax Occlusion mapping fragment shader failed to compile:\n%s\n",
+                      info);
+            g_free(info);
+            glDeleteObjectARB(prog);
+            prog = 0;
+         }
+         glDeleteObjectARB(frag_shader);
+      
+         if(prog)
+         {
+            glLinkProgramARB(prog);
+            glGetObjectParameterivARB(prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+            
+            if(!res)
+            {
+               glGetObjectParameterivARB(prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+               info = g_malloc(len + 1);
+               glGetInfoLogARB(prog, len, 0, info);
+               g_message("Parallax Occlusion mapping program failed to link:\n%s\n",
+                         info);
+               g_free(info);
+               glDeleteObjectARB(prog);
+               prog = 0;
+            }
+         }
+            
+         programs[BUMPMAP_POM] = prog;
+      }
       else
-      {
-         glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(frag_shader, len, 0, info);
-         g_message(info);
-         g_free(info);
-      }
-      glDeleteObjectARB(frag_shader);
-      
-      glLinkProgramARB(relief_prog);
-      glGetObjectParameterivARB(relief_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+         programs[BUMPMAP_POM] = 0;
 
-      if(!res)
+      if(max_instructions >= 200 && max_indirections >= 100)
       {
-         glGetObjectParameterivARB(relief_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(relief_prog, len, 0, info);
-         g_message(info);
-         g_free(info);
+         prog = glCreateProgramObjectARB();
+         glAttachObjectARB(prog, vert_shader);
+         
+         frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
+         glShaderSourceARB(frag_shader, 1, &relief_frag_source, 0);
+         glCompileShaderARB(frag_shader);
+         glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
+         if(res)
+            glAttachObjectARB(prog, frag_shader);
+         else
+         {
+            glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+            info = g_malloc(len + 1);
+            glGetInfoLogARB(frag_shader, len, 0, info);
+            g_message("Relief mapping fragment shader failed to compile:\n%s\n",
+                      info);
+            g_free(info);
+            glDeleteObjectARB(prog);
+            prog = 0;
+         }
+         glDeleteObjectARB(frag_shader);
+         
+         if(prog)
+         {
+            glLinkProgramARB(prog);
+            glGetObjectParameterivARB(prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+            
+            if(!res)
+            {
+               glGetObjectParameterivARB(prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
+               info = g_malloc(len + 1);
+               glGetInfoLogARB(prog, len, 0, info);
+               g_message("Relief mapping program failed to link:\n%s\n", info);
+               g_free(info);
+               glDeleteObjectARB(prog);
+               prog = 0;
+            }
+         }
+         
+         programs[BUMPMAP_RELIEF] = prog;
       }
-
-      pom_prog = glCreateProgramObjectARB();
-      glAttachObjectARB(pom_prog, vert_shader);
-      
-      if(tex_indirections < 100)
-         sources[0] = "#define ATI 1\n";
       else
-         sources[0] = "";
-      
-      sources[1] = pom_frag_source;
-      
-      frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
-      glShaderSourceARB(frag_shader, 2, sources, 0);
-      glCompileShaderARB(frag_shader);
-      glGetObjectParameterivARB(frag_shader, GL_OBJECT_COMPILE_STATUS_ARB, &res);
-      if(res)
-         glAttachObjectARB(pom_prog, frag_shader);
-      else
-      {
-         glGetObjectParameterivARB(frag_shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(frag_shader, len, 0, info);
-         g_message(info);
-         g_free(info);
-      }
-      glDeleteObjectARB(frag_shader);
-      
-      glLinkProgramARB(pom_prog);
-      glGetObjectParameterivARB(pom_prog, GL_OBJECT_LINK_STATUS_ARB, &res);
+         programs[BUMPMAP_RELIEF] = 0;
 
-      if(!res)
-      {
-         glGetObjectParameterivARB(pom_prog, GL_OBJECT_INFO_LOG_LENGTH_ARB, &len);
-         info = g_malloc(len + 1);
-         glGetInfoLogARB(pom_prog, len, 0, info);
-         g_message(info);
-         g_free(info);
-      }
-      
       glDeleteObjectARB(vert_shader);
 
-      glUseProgramObjectARB(normal_prog);
-      loc = glGetUniformLocationARB(normal_prog, "sNormal");
-      glUniform1iARB(loc, 0);
-      loc = glGetUniformLocationARB(normal_prog, "sDiffuse");
-      glUniform1iARB(loc, 1);
-      loc = glGetUniformLocationARB(normal_prog, "sGloss");
-      glUniform1iARB(loc, 2);
-      loc = glGetUniformLocationARB(normal_prog, "lightDir");
-      glUniform3fARB(loc, 0, 0, 1);
+      if(programs[BUMPMAP_NORMAL])
+      {
+         glUseProgramObjectARB(programs[BUMPMAP_NORMAL]);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_NORMAL], "sNormal");
+         glUniform1iARB(loc, 0);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_NORMAL], "sDiffuse");
+         glUniform1iARB(loc, 1);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_NORMAL], "sGloss");
+         glUniform1iARB(loc, 2);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_NORMAL], "lightDir");
+         glUniform3fARB(loc, 0, 0, 1);
+      }
       
-      glUseProgramObjectARB(parallax_prog);
-      loc = glGetUniformLocationARB(parallax_prog, "sNormal");
-      glUniform1iARB(loc, 0);
-      loc = glGetUniformLocationARB(parallax_prog, "sDiffuse");
-      glUniform1iARB(loc, 1);
-      loc = glGetUniformLocationARB(parallax_prog, "sGloss");
-      glUniform1iARB(loc, 2);
-      loc = glGetUniformLocationARB(parallax_prog, "lightDir");
-      glUniform3fARB(loc, 0, 0, 1);
+      if(programs[BUMPMAP_PARALLAX])
+      {
+         glUseProgramObjectARB(programs[BUMPMAP_PARALLAX]);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_PARALLAX], "sNormal");
+         glUniform1iARB(loc, 0);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_PARALLAX], "sDiffuse");
+         glUniform1iARB(loc, 1);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_PARALLAX], "sGloss");
+         glUniform1iARB(loc, 2);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_PARALLAX], "lightDir");
+         glUniform3fARB(loc, 0, 0, 1);
+      }
 
-      glUseProgramObjectARB(relief_prog);
-      loc = glGetUniformLocationARB(relief_prog, "sNormal");
-      glUniform1iARB(loc, 0);
-      loc = glGetUniformLocationARB(relief_prog, "sDiffuse");
-      glUniform1iARB(loc, 1);
-      loc = glGetUniformLocationARB(relief_prog, "sGloss");
-      glUniform1iARB(loc, 2);
-      loc = glGetUniformLocationARB(relief_prog, "lightDir");
-      glUniform3fvARB(loc, 1, light_dir);
-      loc = glGetUniformLocationARB(relief_prog, "depth_factor");
-      glUniform1fARB(loc, 0.05f);
-
-      glUseProgramObjectARB(pom_prog);
-      loc = glGetUniformLocationARB(pom_prog, "sNormal");
-      glUniform1iARB(loc, 0);
-      loc = glGetUniformLocationARB(pom_prog, "sDiffuse");
-      glUniform1iARB(loc, 1);
-      loc = glGetUniformLocationARB(pom_prog, "sGloss");
-      glUniform1iARB(loc, 2);
-      loc = glGetUniformLocationARB(pom_prog, "lightDir");
-      glUniform3fvARB(loc, 1, light_dir);
-      loc = glGetUniformLocationARB(pom_prog, "depth_factor");
-      glUniform1fARB(loc, 0.05f);
+      if(programs[BUMPMAP_POM])
+      {
+         glUseProgramObjectARB(programs[BUMPMAP_POM]);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "sNormal");
+         glUniform1iARB(loc, 0);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "sDiffuse");
+         glUniform1iARB(loc, 1);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "sGloss");
+         glUniform1iARB(loc, 2);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "lightDir");
+         glUniform3fvARB(loc, 1, light_dir);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "depth_factor");
+         glUniform1fARB(loc, 0.05f);
+      }
+      
+      if(programs[BUMPMAP_RELIEF])
+      {
+         glUseProgramObjectARB(programs[BUMPMAP_RELIEF]);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "sNormal");
+         glUniform1iARB(loc, 0);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "sDiffuse");
+         glUniform1iARB(loc, 1);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "sGloss");
+         glUniform1iARB(loc, 2);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "lightDir");
+         glUniform3fvARB(loc, 1, light_dir);
+         loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "depth_factor");
+         glUniform1fARB(loc, 0.05f);
+      }
       
       glUseProgramObjectARB(0);
       
-      if(tex_indirections < 100)
-         gtk_widget_set_sensitive(bumpmapping_relief_item, 0);
+      menu = gtk_option_menu_get_menu(GTK_OPTION_MENU(bumpmapping_opt));
+      curr = gtk_container_get_children(GTK_CONTAINER(menu));
+      for(i = 0; i < BUMPMAP_MAX && curr; ++i)
+      {
+         if(programs[i] == 0)
+            gtk_widget_set_sensitive(GTK_WIDGET(curr->data), 0);
+         curr = curr->next;
+      }
    }
    else
    {
@@ -833,14 +914,7 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    
    if(has_glsl)
    {
-      switch(bumpmapping)
-      {
-         case 0: prog = normal_prog;   break;
-         case 1: prog = parallax_prog; break;
-         case 2: prog = pom_prog;      break;
-         case 3: prog = relief_prog;   break;
-      }
-
+      prog = programs[bumpmapping];
       glUseProgramObjectARB(prog);
       loc = glGetUniformLocationARB(prog, "specular");
       glUniform1iARB(loc, specular);
@@ -1274,6 +1348,7 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
 
 void show_3D_preview(GimpDrawable *drawable)
 {
+   int i;
    GtkWidget *vbox;
    GtkWidget *table;
    GtkWidget *opt;
@@ -1284,6 +1359,10 @@ void show_3D_preview(GimpDrawable *drawable)
    GtkWidget *hscale;
    GdkGLConfig *glconfig;
    GimpRGB color;
+   const char *bumpmap_strings[BUMPMAP_MAX] =
+   {
+      "Normal", "Parallax", "Parallax Occlusion", "Relief"
+   };
    
    bumpmapping = 0;
    specular = 0;
@@ -1368,31 +1447,16 @@ void show_3D_preview(GimpDrawable *drawable)
                              opt, 1, 0);
    
    menu = gtk_menu_new();
-	menuitem = gtk_menu_item_new_with_label("Normal");
-	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
-							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
-							 (gpointer)0);
-	gtk_widget_show(menuitem);
-	gtk_menu_append(GTK_MENU(menu), menuitem);
-	menuitem = gtk_menu_item_new_with_label("Parallax");
-	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
-							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
-							 (gpointer)1);
-	gtk_widget_show(menuitem);
-	gtk_menu_append(GTK_MENU(menu), menuitem);
-	menuitem = gtk_menu_item_new_with_label("Parallax occlusion");
-	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
-							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
-							 (gpointer)2);
-	gtk_widget_show(menuitem);
-	gtk_menu_append(GTK_MENU(menu), menuitem);
-	menuitem = gtk_menu_item_new_with_label("Relief");
-   bumpmapping_relief_item = menuitem;
-	gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
-							 GTK_SIGNAL_FUNC(bumpmapping_clicked),
-							 (gpointer)3);
-	gtk_widget_show(menuitem);
-	gtk_menu_append(GTK_MENU(menu), menuitem);
+
+   for(i = 0; i < BUMPMAP_MAX; ++i)
+   {
+      menuitem = gtk_menu_item_new_with_label(bumpmap_strings[i]);
+      gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+                         GTK_SIGNAL_FUNC(bumpmapping_clicked),
+                         (gpointer)i);
+      gtk_widget_show(menuitem);
+      gtk_menu_append(GTK_MENU(menu), menuitem);
+   }
    
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
    
