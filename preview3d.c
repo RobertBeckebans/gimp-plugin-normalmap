@@ -59,7 +59,6 @@ static GLuint white_tex = 0;
 static const float anisotropy = 4.0f;
 
 static int has_glsl = 0;
-static int has_npot = 0;
 
 static int max_instructions = 0;
 static int max_indirections = 0;
@@ -423,36 +422,6 @@ static void mat_mult_vec(float *v, float *m)
 #undef M
 #undef T
 
-static int check_NPOT(void)
-{
-   const char *version;
-   char *vendor;
-   unsigned char dummy[3*3*3*2];
-   int i;
-   int major, minor, release;
-   
-   /* check extension */
-   if(GLEW_ARB_texture_non_power_of_two)
-      return(1);
-   
-   /* check for 2.0 and not nvidia (NV3x does NPOT in software) */
-   version = glGetString(GL_VERSION);
-   vendor = g_strdup(glGetString(GL_VENDOR));
-   for(i = 0; i < strlen(vendor); ++i)
-      vendor[i] = tolower(vendor[i]);
-   sscanf(version, "%d.%d.%d", &major, &minor, &release);
-   if(major == 2 && strstr(vendor, "nvidia")) return(0);
-   g_free(vendor);
-   
-   /* try a 3x3 texture upload (ATI supports NPOT, but no extension string) */
-   glBindTexture(GL_TEXTURE_2D, 0);
-   glGetError();
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 3, 3, 0, GL_RGB, GL_UNSIGNED_BYTE, dummy);
-   if(glGetError() != GL_NONE) return(0);
-                   
-   return(1);
-}
-
 static void init(GtkWidget *widget, gpointer data)
 {
    int i, err;
@@ -506,8 +475,6 @@ static void init(GtkWidget *widget, gpointer data)
       g_message("GL_SGIS_generate_mipmap is required for the 3D preview");
       _gl_error = 1;
    }
-   
-   has_npot = check_NPOT();
    
    if(_gl_error) return;
 
@@ -1106,10 +1073,66 @@ static void window_destroy(GtkWidget *widget, gpointer data)
    _active = 0;
 }
 
+static void get_nearest_pot(unsigned int w, unsigned int h,
+                            unsigned int *w_pot, unsigned int *h_pot)
+{
+   unsigned int n, next_pot, prev_pot, d1, d2;
+   
+   if(!IS_POT(w))
+   {
+      next_pot = 1;
+      for(n = 1; n <= 12; ++n)
+      {
+         prev_pot = next_pot;
+         next_pot = 1 << n;
+         if(next_pot >= w) break;
+      }
+      
+      if(next_pot < w)
+         *w_pot = next_pot;
+      else
+      {
+         d1 = w - prev_pot;
+         d2 = next_pot - w;
+         if(d1 < d2)
+            *w_pot = prev_pot;
+         else
+            *w_pot = next_pot;
+      }
+   }
+   else
+      *w_pot = w;
+   
+   if(!IS_POT(h))
+   {
+      next_pot = 1;
+      for(n = 1; n <= 12; ++n)
+      {
+         prev_pot = next_pot;
+         next_pot = 1 << n;
+         if(next_pot >= h) break;
+      }
+      
+      if(next_pot < h)
+         *h_pot = next_pot;
+      else
+      {
+         d1 = h - prev_pot;
+         d2 = next_pot - h;
+         if(d1 < d2)
+            *h_pot = prev_pot;
+         else
+            *h_pot = next_pot;
+      }
+   }
+   else
+      *h_pot = h;
+}
+
 static void diffusemap_callback(gint32 id, gpointer data)
 {
    GimpDrawable *drawable;
-   int n, w, h, bpp;
+   int w, h, bpp;
    int w_pot, h_pot;
    unsigned char *pixels, *tmp;
    GimpPixelRgn src_rgn;
@@ -1145,37 +1168,17 @@ static void diffusemap_callback(gint32 id, gpointer data)
    pixels = g_malloc(w * h * bpp);
    gimp_pixel_rgn_init(&src_rgn, drawable, 0, 0, w, h, 0, 0);
    gimp_pixel_rgn_get_rect(&src_rgn, pixels, 0, 0, w, h);
-   
-   w_pot = w;
-   h_pot = h;
-   
-   if(!has_npot)
+
+   if(!GLEW_ARB_texture_non_power_of_two &&
+      !(IS_POT(w) && IS_POT(h)))
    {
-      if(!IS_POT(w_pot))
-      {
-         for(n = 0; n < 32; ++n)
-         {
-            w_pot = 1 << n;
-            if(w_pot > w) break;
-         }
-      }
-   
-      if(!IS_POT(h_pot))
-      {
-         for(n = 0; n < 32; ++n)
-         {
-            h_pot = 1 << n;
-            if(h_pot > h) break;
-         }
-      }
-   }
-   
-   if((w_pot != w) || (h_pot != h))
-   {
+      get_nearest_pot(w, h, &w_pot, &h_pot);
       tmp = g_malloc(h_pot * w_pot * bpp);
       scale_pixels(tmp, w_pot, h_pot, pixels, w, h, bpp);
       g_free(pixels);
       pixels = tmp;
+      w = w_pot;
+      h = h_pot;
    }
 
    glActiveTexture(GL_TEXTURE1);
@@ -1186,7 +1189,7 @@ static void diffusemap_callback(gint32 id, gpointer data)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
-   glTexImage2D(GL_TEXTURE_2D, 0, type, w_pot, h_pot, 0,
+   glTexImage2D(GL_TEXTURE_2D, 0, type, w, h, 0,
                 type, GL_UNSIGNED_BYTE, pixels);
    
    g_free(pixels);
@@ -1199,7 +1202,7 @@ static void diffusemap_callback(gint32 id, gpointer data)
 static void glossmap_callback(gint32 id, gpointer data)
 {
    GimpDrawable *drawable;
-   int n, w, h, bpp;
+   int w, h, bpp;
    int w_pot, h_pot;
    unsigned char *pixels, *tmp;
    GimpPixelRgn src_rgn;
@@ -1236,36 +1239,16 @@ static void glossmap_callback(gint32 id, gpointer data)
    gimp_pixel_rgn_init(&src_rgn, drawable, 0, 0, w, h, 0, 0);
    gimp_pixel_rgn_get_rect(&src_rgn, pixels, 0, 0, w, h);
    
-   w_pot = w;
-   h_pot = h;
-   
-   if(!has_npot)
+   if(!GLEW_ARB_texture_non_power_of_two &&
+      !(IS_POT(w) && IS_POT(h)))
    {
-      if(!IS_POT(w_pot))
-      {
-         for(n = 0; n < 32; ++n)
-         {
-            w_pot = 1 << n;
-            if(w_pot > w) break;
-         }
-      }
-   
-      if(!IS_POT(h_pot))
-      {
-         for(n = 0; n < 32; ++n)
-         {
-            h_pot = 1 << n;
-            if(h_pot > h) break;
-         }
-      }
-   }
-   
-   if((w_pot != w) || (h_pot != h))
-   {
+      get_nearest_pot(w, h, &w_pot, &h_pot);
       tmp = g_malloc(h_pot * w_pot * bpp);
       scale_pixels(tmp, w_pot, h_pot, pixels, w, h, bpp);
       g_free(pixels);
       pixels = tmp;
+      w = w_pot;
+      h = h_pot;
    }
 
    glActiveTexture(GL_TEXTURE2);
@@ -1276,7 +1259,7 @@ static void glossmap_callback(gint32 id, gpointer data)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
-   glTexImage2D(GL_TEXTURE_2D, 0, type, w_pot, h_pot, 0,
+   glTexImage2D(GL_TEXTURE_2D, 0, type, w, h, 0,
                 type, GL_UNSIGNED_BYTE, pixels);
    
    g_free(pixels);
@@ -1527,37 +1510,20 @@ void destroy_3D_preview(void)
 void update_3D_preview(unsigned int w, unsigned int h, int bpp,
                        unsigned char *image)
 {
-   unsigned int n, w_pot = w, h_pot = h;
+   unsigned int w_pot, h_pot;
    unsigned char *pixels = image;
    
    if(!_active) return;
    if(_gl_error) return;
    
-   if(!has_npot)
+   if(!GLEW_ARB_texture_non_power_of_two &&
+      !(IS_POT(w) && IS_POT(h)))
    {
-      if(!IS_POT(w_pot))
-      {
-         for(n = 0; n < 32; ++n)
-         {
-            w_pot = 1 << n;
-            if(w_pot > w) break;
-         }
-      }
-      
-      if(!IS_POT(h_pot))
-      {
-         for(n = 0; n < 32; ++n)
-         {
-            h_pot = 1 << n;
-            if(h_pot > h) break;
-         }
-      }
-   }
-   
-   if((w_pot != w) || (h_pot != h))
-   {
+      get_nearest_pot(w, h, &w_pot, &h_pot);
       pixels = g_malloc(h_pot * w_pot * bpp);
       scale_pixels(pixels, w_pot, h_pot, image, w, h, bpp);
+      w = w_pot;
+      h = h_pot;
    }
 
    glActiveTexture(GL_TEXTURE0);
@@ -1568,7 +1534,7 @@ void update_3D_preview(unsigned int w, unsigned int h, int bpp,
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
-   glTexImage2D(GL_TEXTURE_2D, 0, bpp, w_pot, h_pot, 0,
+   glTexImage2D(GL_TEXTURE_2D, 0, bpp, w, h, 0,
                 (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, pixels);
    
    if(pixels != image)
