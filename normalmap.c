@@ -911,8 +911,8 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
 #define HEIGHT(x,y) \
 	(heights[(max(0, min(width - 1, (x)))) + (max(0, min(height - 1, (y)))) * width])
 #define HEIGHT_WRAP(x,y) \
-   (heights[((x)<0 ? (width + (x)) : ((x) >= width ? ((x) - width) : (x)))+ \
-            (((y)<0 ? (height + (y)) : ((y) >= height ? ((y) - height) : (y))) * width)])
+   (heights[((x) < 0 ? (width + (x)) : ((x) >= width ? ((x) - width) : (x)))+ \
+            (((y) < 0 ? (height + (y)) : ((y) >= height ? ((y) - height) : (y))) * width)])
 
 	if(preview_mode)
    {

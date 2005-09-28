@@ -1396,7 +1396,7 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_widget_show(vbox);
    
    glarea = gtk_drawing_area_new();
-   gtk_widget_set_usize(glarea, 300, 300);
+   gtk_widget_set_usize(glarea, 500, 300);
    gtk_widget_set_gl_capability(glarea, glconfig, 0, 1, GDK_GL_RGBA_TYPE);
    gtk_widget_set_events(glarea, GDK_EXPOSURE_MASK |
                          GDK_BUTTON_PRESS_MASK |
@@ -1411,8 +1411,6 @@ void show_3D_preview(GimpDrawable *drawable)
                       GTK_SIGNAL_FUNC(button_press), 0);
    gtk_signal_connect(GTK_OBJECT(glarea), "configure_event",
                       GTK_SIGNAL_FUNC(configure), 0);
-   
-   gtk_widget_set_usize(glarea, 500, 375);
    
    gtk_box_pack_start(GTK_BOX(vbox), glarea, 1, 1, 0);
 
