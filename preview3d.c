@@ -78,9 +78,9 @@ static const char *vert_source =
    "   gl_Position = ftransform();\n"
    "   tex = gl_MultiTexCoord0.xy;\n"
    "   vpos = (gl_ModelViewMatrix * gl_Vertex).xyz;\n"
-   "   normal   = gl_NormalMatrix * gl_Normal;\n"
    "   tangent  = gl_NormalMatrix * gl_MultiTexCoord3.xyz;\n"
    "   binormal = gl_NormalMatrix * gl_MultiTexCoord4.xyz;\n"
+   "   normal   = gl_NormalMatrix * gl_Normal;\n"
    "}\n";
 
 static const char *normal_frag_source =
@@ -480,7 +480,6 @@ static void init(GtkWidget *widget, gpointer data)
    glEnable(GL_DEPTH_TEST);
 
    glLineWidth(3);
-   glEnable(GL_LINE_SMOOTH);
 
    _gl_error = 0;
 
@@ -995,6 +994,8 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    if(has_glsl)
       glUseProgramObjectARB(0);
    
+   glEnable(GL_LINE_SMOOTH);
+   
    glColor4f(1, 1, 1, 1);
    glBegin(GL_LINE_LOOP);
    {
@@ -1004,6 +1005,8 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
       glVertex3f( 1,  1, 0);
    }
    glEnd();
+   
+   glDisable(GL_LINE_SMOOTH);
    
    glActiveTexture(GL_TEXTURE2);
    glEnable(GL_TEXTURE_2D);
