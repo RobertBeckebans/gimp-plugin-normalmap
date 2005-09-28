@@ -475,9 +475,6 @@ static void init(GtkWidget *widget, gpointer data)
       _gl_error = 1;
    }
 
-   if(!GLEW_VERSION_1_3)
-      g_message("FUCK");
-   
    glClearColor(0, 0, 0.4f, 0);
    glDepthFunc(GL_LEQUAL);
    glEnable(GL_DEPTH_TEST);
