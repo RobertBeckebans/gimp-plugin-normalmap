@@ -30,7 +30,16 @@
 
 #include "scale.h"
 
+#include "object.xpm"
+#include "light.xpm"
+#include "scene.xpm"
+#include "full.xpm"
+
 #define IS_POT(x)  (((x) & ((x) - 1)) == 0)
+
+typedef float matrix[16];
+typedef float vec4[4];
+typedef float vec3[3];
 
 typedef enum
 {
@@ -38,11 +47,19 @@ typedef enum
    BUMPMAP_MAX
 } BUMPMAP_TYPE;
 
+typedef enum
+{
+   ROTATE_OBJECT = 0, ROTATE_LIGHT, ROTATE_SCENE,
+   ROTATE_MAX
+} ROTATE_TYPE;
+
 static int _active = 0;
 static int _gl_error = 0;
 static gint32 normalmap_drawable_id = -1;
 static GtkWidget *window = 0;
 static GtkWidget *glarea = 0;
+static GtkWidget *rotate_obj_btn = 0;
+static GtkWidget *controls_table = 0;
 static GtkWidget *bumpmapping_opt = 0;
 static GtkWidget *specular_check = 0;
 static GtkWidget *gloss_opt = 0;
@@ -50,6 +67,8 @@ static GtkWidget *specular_exp_range = 0;
 static GtkWidget *ambient_color_btn = 0;
 static GtkWidget *diffuse_color_btn = 0;
 static GtkWidget *specular_color_btn = 0;
+
+static int fullscreen = 0;
 
 static GLuint diffuse_tex = 0;
 static GLuint gloss_tex = 0;
@@ -349,26 +368,29 @@ static const char *relief_frag_source =
 
 static int bumpmapping = BUMPMAP_NORMAL;
 static int specular = 0;
+static int rotate_type = ROTATE_OBJECT;
 
-static float ambient_color[3] = {0.1f, 0.1f, 0.1f};
-static float diffuse_color[3] = {1, 1, 1};
-static float specular_color[3] = {1, 1, 1};
+static vec3 ambient_color = {0.1f, 0.1f, 0.1f};
+static vec3 diffuse_color = {1, 1, 1};
+static vec3 specular_color = {1, 1, 1};
 static float specular_exp = 32.0f;
 
-static float light_dir[3] = {0, 0, 1};
+static vec3 light_dir = {0, 0, 1};
 
 static int mx;
 static int my;
-static float rot[3];
+static vec3 object_rot;
+static vec3 light_rot;
+static vec3 scene_rot;
 static float zoom;
 
 #define M(r,c) m[(c << 2) + r]
 #define T(r,c) t[(c << 2) + r]
 
-static void mat_invert(float *m)
+static void mat_invert(matrix m)
 {
    float invdet;
-   float t[16];
+   matrix t;
 
    invdet = (float)1.0 / (M(0, 0) * (M(1, 1) * M(2, 2) - M(1, 2) * M(2, 1)) -
                           M(0, 1) * (M(1, 0) * M(2, 2) - M(1, 2) * M(2, 0)) +
@@ -397,19 +419,19 @@ static void mat_invert(float *m)
    memcpy(m, t, 16 * sizeof(float));
 }
 
-static void mat_transpose(float *m)
+static void mat_transpose(matrix m)
 {
-   float t[16];
+   matrix t;
    t[0 ] = m[0 ]; t[1 ] = m[4 ]; t[2 ] = m[8 ]; t[3 ] = m[12];
    t[4 ] = m[1 ]; t[5 ] = m[5 ]; t[6 ] = m[9 ]; t[7 ] = m[13];
    t[8 ] = m[2 ]; t[9 ] = m[6 ]; t[10] = m[10]; t[11] = m[14];
    t[12] = m[3 ]; t[13] = m[7 ]; t[14] = m[11]; t[15] = m[15];
-   memcpy(m, t, 16 * sizeof(float));
+   memcpy(m, t, sizeof(matrix));
 }
 
-static void mat_mult_vec(float *v, float *m)
+static void mat_mult_vec(vec3 v, matrix m)
 {
-   float t[3];
+   vec3 t;
    t[0] = M(0, 0) * v[0] + M(0, 1) * v[1] + M(0, 2) * v[2];
    t[1] = M(1, 0) * v[0] + M(1, 1) * v[1] + M(1, 2) * v[2];
    t[2] = M(2, 0) * v[0] + M(2, 1) * v[1] + M(2, 2) * v[2];
@@ -417,6 +439,76 @@ static void mat_mult_vec(float *v, float *m)
    v[0] = t[0];
    v[1] = t[1];
    v[2] = t[2];
+}
+
+static void vec4_normalize(vec4 r, vec4 v)
+{
+   float len = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]);
+   if(len != 0)
+   {
+      float ilen = 1.0f / len;
+      r[0] = v[0] * ilen;
+      r[1] = v[1] * ilen;
+      r[2] = v[2] * ilen;
+      r[3] = v[3] * ilen;
+   }
+   else
+      r[0] = r[1] = r[2] = r[3] = 0;
+}
+
+static void vec3_normalize(vec3 r, vec3 v)
+{
+   float len = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+   if(len != 0.0f)
+   {
+      float ilen = 1.0f / len;
+      r[0] = v[0] * ilen;
+      r[1] = v[1] * ilen;
+      r[2] = v[2] * ilen;
+   }
+   else
+      r[0] = r[1] = r[2] = 0;
+}
+
+static inline void quat_ident(vec4 q)
+{
+   q[0] = q[1] = q[2] = 0;
+   q[3] = 1;
+}
+
+static void quat_mul(vec4 r, vec4 a, vec4 b)
+{
+   r[0] = a[0] * b[3] + b[0] * a[3] + a[1] * b[2] - a[2] * b[1];
+   r[1] = a[1] * b[3] + b[1] * a[3] + a[2] * b[0] - a[0] * b[2];
+   r[2] = a[2] * b[3] + b[2] * a[3] + a[0] * b[1] - a[1] * b[0];
+   r[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+}
+
+static void quat_rotate(vec4 q, float a, float x, float y, float z)
+{
+   float hs, len, ilen;
+   
+   len = sqrtf(x * x + y * y + z * z);
+   if(len == 0) return;
+   ilen = 1.0f / len;
+   x *= ilen;
+   y *= ilen;
+   z *= ilen;
+   
+   a = (a * (M_PI / 180.0f)) * 0.5f;
+   
+   hs = sinf(a);
+   q[0] = x * hs;
+   q[1] = y * hs;
+   q[2] = z * hs;
+   q[3] = cosf(a);
+}
+
+static void quat_get_direction(vec3 v, vec4 q)
+{
+   v[0] = 2.0f * (q[0] * q[2] - q[3] * q[1]);
+   v[1] = 2.0f * (q[1] * q[2] + q[3] * q[0]);
+   v[2] = 1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]);
 }
 
 #undef M
@@ -815,7 +907,9 @@ static void init(GtkWidget *widget, gpointer data)
       gtk_widget_set_sensitive(specular_color_btn, 0);
    }
 
-   rot[0] = rot[1] = rot[2] = 0;
+   object_rot[0] = object_rot[1] = object_rot[2] = 0;
+   light_rot[0] = light_rot[1] = light_rot[2] = 0;
+   scene_rot[0] = scene_rot[1] = scene_rot[2] = 0;
    zoom = 2;
 
    gdk_gl_drawable_gl_end(gldrawable);
@@ -823,8 +917,9 @@ static void init(GtkWidget *widget, gpointer data)
 
 static gint expose(GtkWidget *widget, GdkEventExpose *event)
 {
-   float m[16];
-   float l[3], c[3], mag;
+   matrix m;
+   vec3 l, c;
+   vec4 qx, qy, qz, qt, qrot;
    int loc;
    GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
    GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
@@ -846,28 +941,34 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    
    glMatrixMode(GL_MODELVIEW);
    glLoadIdentity();
+   glRotatef(scene_rot[0], 1, 0, 0);
+   glRotatef(scene_rot[1], 0, 1, 0);
+   glRotatef(scene_rot[2], 0, 0, 1);
    glTranslatef(0, 0, -zoom);
-   glRotatef(rot[0], 1, 0, 0);
-   glRotatef(rot[1], 0, 1, 0);
-   glRotatef(rot[2], 0, 0, 1);
+   glRotatef(object_rot[0], 1, 0, 0);
+   glRotatef(object_rot[1], 0, 1, 0);
+   glRotatef(object_rot[2], 0, 0, 1);
    glGetFloatv(GL_MODELVIEW_MATRIX, m);
-
+   
+   quat_ident(qx);
+   quat_ident(qy);
+   quat_ident(qz);
+   quat_rotate(qx, -light_rot[0], 1, 0, 0);
+   quat_rotate(qy, -light_rot[1], 0, 1, 0);
+   quat_rotate(qz, -light_rot[2], 0, 0, 1);
+   quat_mul(qt, qx, qy);
+   quat_mul(qrot, qt, qz);
+   vec4_normalize(qrot, qrot);
+   quat_get_direction(light_dir, qrot);
+   
    mat_invert(m);
    mat_transpose(m);
    l[0] = light_dir[0];
    l[1] = light_dir[1];
    l[2] = light_dir[2];
    mat_mult_vec(l, m);
-   
-   mag = sqrtf(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
-   if(mag != 0)
-   {
-      l[0] /= mag;
-      l[1] /= mag;
-      l[2] /= mag;
-   }
-   else
-      l[0] = l[1] = l[2] = 0;
+
+   vec3_normalize(l, l);
 
    c[0] = (-l[0] * 0.5f) + 0.5f;
    c[1] = (l[1] * 0.5f) + 0.5f;
@@ -889,6 +990,8 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
       glUniform3fvARB(loc, 1, specular_color);
       loc = glGetUniformLocationARB(prog, "specular_exp");
       glUniform1fARB(loc, specular_exp);
+      loc = glGetUniformLocationARB(prog, "lightDir");
+      glUniform3fvARB(loc, 1, light_dir);
    }
 
    glMultiTexCoord3f(GL_TEXTURE3, 1, 0, 0);
@@ -1030,6 +1133,7 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
 {
    int x, y;
    float dx, dy;
+   float *rot;
    GdkModifierType state;
    
    if(event->is_hint)
@@ -1047,6 +1151,12 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
 
    dx = -0.25f * (float)(mx - x);
    dy = -0.25f * (float)(my - y);
+   
+   rot = object_rot;
+   if(rotate_type == ROTATE_LIGHT)
+      rot = light_rot;
+   else if(rotate_type == ROTATE_SCENE)
+      rot = scene_rot;
    
    if(state & GDK_BUTTON1_MASK)
    {
@@ -1275,6 +1385,21 @@ static void bumpmapping_clicked(GtkWidget *widget, gpointer data)
    gtk_widget_queue_draw(glarea);
 }
 
+static void toggle_fullscreen(GtkWidget *widget, gpointer data)
+{
+   fullscreen = !fullscreen;
+   if(fullscreen)
+   {
+      gtk_window_fullscreen(GTK_WINDOW(window));
+      gtk_widget_hide(controls_table);
+   }
+   else
+   {
+      gtk_window_unfullscreen(GTK_WINDOW(window));
+      gtk_widget_show(controls_table);
+   }
+}
+
 static void toggle_clicked(GtkWidget *widget, gpointer data)
 {
    *((int*)data) = !(*((int*)data));
@@ -1300,11 +1425,19 @@ static void color_changed(GtkWidget *widget, gpointer data)
    gtk_widget_queue_draw(glarea);
 }
 
+static void rotate_type_toggled(GtkWidget *widget, gpointer data)
+{
+   if(gtk_toggle_tool_button_get_active(GTK_TOGGLE_TOOL_BUTTON(widget)))
+      rotate_type = (int)data;
+}
+
 static void reset_view_clicked(GtkWidget *widget, gpointer data)
 {
    GimpRGB c;
    
-   rot[0] = rot[1] = rot[2] = 0;
+   object_rot[0] = object_rot[1] = object_rot[2] = 0;
+   light_rot[0] = light_rot[1] = light_rot[2] = 0;
+   scene_rot[0] = scene_rot[1] = scene_rot[2] = 0;
    zoom = 2;
    
    specular_exp = 32.0f;
@@ -1312,6 +1445,7 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
    diffuse_color[0] = diffuse_color[1] = diffuse_color[2] = 1.0f;
    specular_color[0] = specular_color[1] = specular_color[2] = 1.0f;
    
+   gtk_toggle_tool_button_set_active(GTK_TOGGLE_TOOL_BUTTON(rotate_obj_btn), 1);
    gtk_option_menu_set_history(GTK_OPTION_MENU(bumpmapping_opt), 0);
    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(specular_check), 0);
    gtk_range_set_value(GTK_RANGE(specular_exp_range), specular_exp);
@@ -1325,6 +1459,7 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
 
    bumpmapping = 0;
    specular = 0;
+   rotate_type = ROTATE_OBJECT;
    
    gtk_widget_queue_draw(glarea);
 }
@@ -1340,6 +1475,12 @@ void show_3D_preview(GimpDrawable *drawable)
    GtkWidget *check;
    GtkWidget *btn;
    GtkWidget *hscale;
+   GtkWidget *toolbar;
+   GtkToolItem *toolbtn;
+   GtkTooltips *tooltips;
+   GtkWidget *icon;
+   GdkPixbuf *pixbuf;
+   GSList *group = 0;
    GdkGLConfig *glconfig;
    GimpRGB color;
    const char *bumpmap_strings[BUMPMAP_MAX] =
@@ -1378,6 +1519,74 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_container_add(GTK_CONTAINER(window), vbox);
    gtk_widget_show(vbox);
    
+   tooltips = gtk_tooltips_new();
+   
+   toolbar = gtk_toolbar_new();
+   gtk_widget_show(toolbar);
+   gtk_toolbar_set_style(GTK_TOOLBAR(toolbar), GTK_TOOLBAR_ICONS);
+   gtk_box_pack_start(GTK_BOX(vbox), toolbar, 0, 0, 0);
+   
+   group = NULL;
+
+   toolbtn = gtk_radio_tool_button_new(group);
+   rotate_obj_btn = (GtkWidget*)toolbtn;
+   gtk_tool_button_set_label(GTK_TOOL_BUTTON(toolbtn), "");
+   pixbuf = gdk_pixbuf_new_from_xpm_data(object_xpm);
+   icon = gtk_image_new_from_pixbuf(pixbuf);
+   gtk_widget_show(icon);
+   gtk_tool_button_set_icon_widget(GTK_TOOL_BUTTON(toolbtn), icon);
+   gtk_tool_item_set_tooltip(GTK_TOOL_ITEM(toolbtn), tooltips, "Rotate object", 0);
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+   gtk_signal_connect(GTK_OBJECT(toolbtn), "toggled",
+                      GTK_SIGNAL_FUNC(rotate_type_toggled),
+                      (gpointer)ROTATE_OBJECT);
+   group = gtk_radio_tool_button_get_group(GTK_RADIO_TOOL_BUTTON(toolbtn));
+   
+   toolbtn = gtk_radio_tool_button_new(group);
+   gtk_tool_button_set_label(GTK_TOOL_BUTTON(toolbtn), "");
+   pixbuf = gdk_pixbuf_new_from_xpm_data(light_xpm);
+   icon = gtk_image_new_from_pixbuf(pixbuf);
+   gtk_widget_show(icon);
+   gtk_tool_button_set_icon_widget(GTK_TOOL_BUTTON(toolbtn), icon);
+   gtk_tool_item_set_tooltip(GTK_TOOL_ITEM(toolbtn), tooltips, "Rotate light", 0);
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+   gtk_signal_connect(GTK_OBJECT(toolbtn), "toggled",
+                      GTK_SIGNAL_FUNC(rotate_type_toggled),
+                      (gpointer)ROTATE_LIGHT);
+   group = gtk_radio_tool_button_get_group(GTK_RADIO_TOOL_BUTTON(toolbtn));
+
+   toolbtn = gtk_radio_tool_button_new(group);
+   gtk_tool_button_set_label(GTK_TOOL_BUTTON(toolbtn), "");
+   pixbuf = gdk_pixbuf_new_from_xpm_data(scene_xpm);
+   icon = gtk_image_new_from_pixbuf(pixbuf);
+   gtk_widget_show(icon);
+   gtk_tool_button_set_icon_widget(GTK_TOOL_BUTTON(toolbtn), icon);
+   gtk_tool_item_set_tooltip(GTK_TOOL_ITEM(toolbtn), tooltips, "Rotate scene", 0);
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+   gtk_signal_connect(GTK_OBJECT(toolbtn), "toggled",
+                      GTK_SIGNAL_FUNC(rotate_type_toggled),
+                      (gpointer)ROTATE_SCENE);
+   group = gtk_radio_tool_button_get_group(GTK_RADIO_TOOL_BUTTON(toolbtn));
+   
+   toolbtn = gtk_separator_tool_item_new();
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+
+   toolbtn = gtk_toggle_tool_button_new();
+   gtk_tool_button_set_label(GTK_TOOL_BUTTON(toolbtn), "");
+   pixbuf = gdk_pixbuf_new_from_xpm_data(full_xpm);
+   icon = gtk_image_new_from_pixbuf(pixbuf);
+   gtk_widget_show(icon);
+   gtk_tool_button_set_icon_widget(GTK_TOOL_BUTTON(toolbtn), icon);
+   gtk_tool_item_set_tooltip(GTK_TOOL_ITEM(toolbtn), tooltips, "Toggle fullscreen", 0);
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+   gtk_signal_connect(GTK_OBJECT(toolbtn), "clicked",
+                      GTK_SIGNAL_FUNC(toggle_fullscreen), 0);
+   
    glarea = gtk_drawing_area_new();
    gtk_widget_set_usize(glarea, 500, 300);
    gtk_widget_set_gl_capability(glarea, glconfig, 0, 1, GDK_GL_RGBA_TYPE);
@@ -1398,6 +1607,7 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_box_pack_start(GTK_BOX(vbox), glarea, 1, 1, 0);
 
    table = gtk_table_new(9, 2, 0);
+   controls_table = table;
    gtk_container_set_border_width(GTK_CONTAINER(table), 5);
    gtk_table_set_col_spacings(GTK_TABLE(table), 5);
    gtk_table_set_row_spacings(GTK_TABLE(table), 5);
