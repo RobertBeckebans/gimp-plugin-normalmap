@@ -30,10 +30,10 @@
 
 #include "scale.h"
 
-#include "object.xpm"
-#include "light.xpm"
-#include "scene.xpm"
-#include "full.xpm"
+#include "pixmaps/object.xpm"
+#include "pixmaps/light.xpm"
+#include "pixmaps/scene.xpm"
+#include "pixmaps/full.xpm"
 
 #define IS_POT(x)  (((x) & ((x) - 1)) == 0)
 
@@ -53,12 +53,19 @@ typedef enum
    ROTATE_MAX
 } ROTATE_TYPE;
 
+typedef enum
+{
+   OBJECT_QUAD = 0, OBJECT_CUBE, OBJECT_SPHERE,
+   OBJECT_MAX
+} OBJECT_TYPE;
+
 static int _active = 0;
 static int _gl_error = 0;
 static gint32 normalmap_drawable_id = -1;
 static GtkWidget *window = 0;
 static GtkWidget *glarea = 0;
 static GtkWidget *rotate_obj_btn = 0;
+static GtkWidget *object_opt = 0;
 static GtkWidget *controls_table = 0;
 static GtkWidget *bumpmapping_opt = 0;
 static GtkWidget *specular_check = 0;
@@ -369,13 +376,12 @@ static const char *relief_frag_source =
 static int bumpmapping = BUMPMAP_NORMAL;
 static int specular = 0;
 static int rotate_type = ROTATE_OBJECT;
+static int object_type = OBJECT_QUAD;
 
 static vec3 ambient_color = {0.1f, 0.1f, 0.1f};
 static vec3 diffuse_color = {1, 1, 1};
 static vec3 specular_color = {1, 1, 1};
 static float specular_exp = 32.0f;
-
-static vec3 light_dir = {0, 0, 1};
 
 static int mx;
 static int my;
@@ -439,6 +445,13 @@ static void mat_mult_vec(vec3 v, matrix m)
    v[0] = t[0];
    v[1] = t[1];
    v[2] = t[2];
+}
+
+static inline void vec3_set(vec3 v, float x, float y, float z)
+{
+   v[0] = x;
+   v[1] = y;
+   v[2] = z;
 }
 
 static void vec4_normalize(vec4 r, vec4 v)
@@ -569,7 +582,7 @@ static void init(GtkWidget *widget, gpointer data)
    }
    
    if(_gl_error) return;
-
+   
    glGenTextures(1, &diffuse_tex);
    glGenTextures(1, &gloss_tex);
    glGenTextures(1, &normal_tex);
@@ -838,8 +851,6 @@ static void init(GtkWidget *widget, gpointer data)
          glUniform1iARB(loc, 1);
          loc = glGetUniformLocationARB(programs[BUMPMAP_NORMAL], "sGloss");
          glUniform1iARB(loc, 2);
-         loc = glGetUniformLocationARB(programs[BUMPMAP_NORMAL], "lightDir");
-         glUniform3fARB(loc, 0, 0, 1);
       }
       
       if(programs[BUMPMAP_PARALLAX])
@@ -851,8 +862,6 @@ static void init(GtkWidget *widget, gpointer data)
          glUniform1iARB(loc, 1);
          loc = glGetUniformLocationARB(programs[BUMPMAP_PARALLAX], "sGloss");
          glUniform1iARB(loc, 2);
-         loc = glGetUniformLocationARB(programs[BUMPMAP_PARALLAX], "lightDir");
-         glUniform3fARB(loc, 0, 0, 1);
       }
 
       if(programs[BUMPMAP_POM])
@@ -864,8 +873,6 @@ static void init(GtkWidget *widget, gpointer data)
          glUniform1iARB(loc, 1);
          loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "sGloss");
          glUniform1iARB(loc, 2);
-         loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "lightDir");
-         glUniform3fvARB(loc, 1, light_dir);
          loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "depth_factor");
          glUniform1fARB(loc, 0.05f);
       }
@@ -879,8 +886,6 @@ static void init(GtkWidget *widget, gpointer data)
          glUniform1iARB(loc, 1);
          loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "sGloss");
          glUniform1iARB(loc, 2);
-         loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "lightDir");
-         glUniform3fvARB(loc, 1, light_dir);
          loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "depth_factor");
          glUniform1fARB(loc, 0.05f);
       }
@@ -915,85 +920,26 @@ static void init(GtkWidget *widget, gpointer data)
    gdk_gl_drawable_gl_end(gldrawable);
 }
 
-static gint expose(GtkWidget *widget, GdkEventExpose *event)
+static void draw_quad(vec3 l, matrix m)
 {
-   matrix m;
-   vec3 l, c;
-   vec4 qx, qy, qz, qt, qrot;
-   int loc;
-   GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
-   GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
-   GLhandleARB prog = 0;
-   
-   if(event->count > 0) return(1);
-   
-   if(!gdk_gl_drawable_gl_begin(gldrawable, glcontext))
-      return(1);
-   
-   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-   
-   if(_gl_error)
-   {
-      gdk_gl_drawable_swap_buffers(gldrawable);
-      gdk_gl_drawable_gl_end(gldrawable);
-      return(1);
-   }
-   
-   glMatrixMode(GL_MODELVIEW);
-   glLoadIdentity();
-   glRotatef(scene_rot[0], 1, 0, 0);
-   glRotatef(scene_rot[1], 0, 1, 0);
-   glRotatef(scene_rot[2], 0, 0, 1);
-   glTranslatef(0, 0, -zoom);
-   glRotatef(object_rot[0], 1, 0, 0);
-   glRotatef(object_rot[1], 0, 1, 0);
-   glRotatef(object_rot[2], 0, 0, 1);
-   glGetFloatv(GL_MODELVIEW_MATRIX, m);
-   
-   quat_ident(qx);
-   quat_ident(qy);
-   quat_ident(qz);
-   quat_rotate(qx, -light_rot[0], 1, 0, 0);
-   quat_rotate(qy, -light_rot[1], 0, 1, 0);
-   quat_rotate(qz, -light_rot[2], 0, 0, 1);
-   quat_mul(qt, qx, qy);
-   quat_mul(qrot, qt, qz);
-   vec4_normalize(qrot, qrot);
-   quat_get_direction(light_dir, qrot);
-   
-   mat_invert(m);
-   mat_transpose(m);
-   l[0] = light_dir[0];
-   l[1] = light_dir[1];
-   l[2] = light_dir[2];
-   mat_mult_vec(l, m);
+   vec3 c, t, b, n;
 
-   vec3_normalize(l, l);
-
-   c[0] = (-l[0] * 0.5f) + 0.5f;
-   c[1] = (l[1] * 0.5f) + 0.5f;
-   c[2] = (l[2] * 0.5f) + 0.5f;
+   vec3_set(t, 1,  0, 0);
+   vec3_set(b, 0, -1, 0);
+   vec3_set(n, 0,  0, 1);
+   mat_mult_vec(t, m);
+   mat_mult_vec(b, m);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
    
    glColor3fv(c);
    
-   if(has_glsl)
-   {
-      prog = programs[bumpmapping];
-      glUseProgramObjectARB(prog);
-      loc = glGetUniformLocationARB(prog, "specular");
-      glUniform1iARB(loc, specular);
-      loc = glGetUniformLocationARB(prog, "ambient_color");
-      glUniform3fvARB(loc, 1, ambient_color);
-      loc = glGetUniformLocationARB(prog, "diffuse_color");
-      glUniform3fvARB(loc, 1, diffuse_color);
-      loc = glGetUniformLocationARB(prog, "specular_color");
-      glUniform3fvARB(loc, 1, specular_color);
-      loc = glGetUniformLocationARB(prog, "specular_exp");
-      glUniform1fARB(loc, specular_exp);
-      loc = glGetUniformLocationARB(prog, "lightDir");
-      glUniform3fvARB(loc, 1, light_dir);
-   }
-
    glMultiTexCoord3f(GL_TEXTURE3, 1, 0, 0);
    glMultiTexCoord3f(GL_TEXTURE4, 0, -1, 0);
    
@@ -1023,8 +969,15 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
    }
    glEnd();
 
-   c[1] = (-l[1] * 0.5f) + 0.5f;
-   c[2] = (-l[2] * 0.5f) + 0.5f;
+   vec3_set(n, 0,  0, -1);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
 
    glColor3fv(c);
 
@@ -1053,37 +1006,351 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
       glVertex3f( 1, -1, -0.001f);
    }
    glEnd();
+}
 
-   glActiveTexture(GL_TEXTURE2);
-   glDisable(GL_TEXTURE_2D);
-   glActiveTexture(GL_TEXTURE1);
-   glDisable(GL_TEXTURE_2D);
-   glActiveTexture(GL_TEXTURE0);
-   glDisable(GL_TEXTURE_2D);
+static void draw_cube(vec3 l, matrix m)
+{
+   vec3 c, t, b, n;
    
-   if(has_glsl)
-      glUseProgramObjectARB(0);
+   vec3_set(t, 1,  0,  0);
+   vec3_set(b, 0, -1,  0);
+   vec3_set(n, 0,  0,  1);
+   mat_mult_vec(t, m);
+   mat_mult_vec(b, m);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
    
-   glEnable(GL_LINE_SMOOTH);
+   glColor3fv(c);
+
+   glMultiTexCoord3f(GL_TEXTURE3, 1, 0, 0);
+   glMultiTexCoord3f(GL_TEXTURE4, 0, -1, 0);
    
-   glColor4f(1, 1, 1, 1);
-   glBegin(GL_LINE_LOOP);
+   glBegin(GL_TRIANGLE_STRIP);
    {
-      glVertex3f(-1,  1, 0);
-      glVertex3f(-1, -1, 0);
-      glVertex3f( 1, -1, 0);
-      glVertex3f( 1,  1, 0);
+      glNormal3f(0, 0, 1);
+      
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
+      glVertex3f(-1, 1, 1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
+      glVertex3f(-1, -1, 1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
+      glVertex3f(1, 1, 1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
+      glVertex3f(1, -1, 1);
+   }
+   glEnd();
+
+   vec3_set(n, 0,  0,  -1);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
+
+   glColor3fv(c);
+   
+   glBegin(GL_TRIANGLE_STRIP);
+   {
+      glNormal3f(0, 0, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
+      glVertex3f(-1,  1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
+      glVertex3f(-1, -1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
+      glVertex3f( 1,  1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
+      glVertex3f( 1, -1, -1);
    }
    glEnd();
    
-   glDisable(GL_LINE_SMOOTH);
+   vec3_set(t,  0,  0,  1);
+   vec3_set(b,  0, -1,  0);
+   vec3_set(n, -1,  0,  0);
+   mat_mult_vec(t, m);
+   mat_mult_vec(b, m);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
    
-   glActiveTexture(GL_TEXTURE2);
-   glEnable(GL_TEXTURE_2D);
-   glActiveTexture(GL_TEXTURE1);
-   glEnable(GL_TEXTURE_2D);
-   glActiveTexture(GL_TEXTURE0);
-   glEnable(GL_TEXTURE_2D);
+   glColor3fv(c);
+   
+   glMultiTexCoord3f(GL_TEXTURE3, 0, 0, 1);
+   glMultiTexCoord3f(GL_TEXTURE4, 0, -1, 0);
+   
+   glBegin(GL_TRIANGLE_STRIP);
+   {
+      glNormal3f(-1, 0, 0);
+      
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
+      glVertex3f(-1, 1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
+      glVertex3f(-1, -1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
+      glVertex3f(-1, 1, 1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
+      glVertex3f(-1, -1, 1);
+   }
+   glEnd();
+
+   vec3_set(n,  1,  0,  0);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
+   
+   glColor3fv(c);
+
+   glBegin(GL_TRIANGLE_STRIP);
+   {
+      glNormal3f(1, 0, 0);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
+      glVertex3f(1,  1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
+      glVertex3f(1, -1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
+      glVertex3f(1,  1,  1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
+      glVertex3f(1, -1,  1);
+   }
+   glEnd();
+   
+   vec3_set(t,  1,  0,  0);
+   vec3_set(b,  0,  0,  1);
+   vec3_set(n,  0,  1,  0);
+   mat_mult_vec(t, m);
+   mat_mult_vec(b, m);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
+   
+   glColor3fv(c);
+
+   glMultiTexCoord3f(GL_TEXTURE3, 1, 0, 0);
+   glMultiTexCoord3f(GL_TEXTURE4, 0, 0, 1);
+   
+   glBegin(GL_TRIANGLE_STRIP);
+   {
+      glNormal3f(0, 1, 0);
+      
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
+      glVertex3f(-1, 1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
+      glVertex3f(-1, 1, 1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
+      glVertex3f(1, 1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
+      glVertex3f(1, 1, 1);
+   }
+   glEnd();
+
+   vec3_set(n,  0, -1,  0);
+   mat_mult_vec(n, m);
+   c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+   c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+   c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+   vec3_normalize(c, c);
+   c[0] = c[0] * 0.5f + 0.5f;
+   c[1] = c[1] * 0.5f + 0.5f;
+   c[2] = c[2] * 0.5f + 0.5f;
+   
+   glColor3fv(c);
+
+   glBegin(GL_TRIANGLE_STRIP);
+   {
+      glNormal3f(0, -1, 0);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
+      glVertex3f(-1, -1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
+      glVertex3f(-1, -1,  1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
+      glVertex3f( 1, -1, -1);
+
+      glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
+      glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
+      glVertex3f( 1, -1, 1);
+   }
+   glEnd();
+}
+
+static void draw_sphere(vec3 l, matrix m)
+{
+   
+}
+
+static gint expose(GtkWidget *widget, GdkEventExpose *event)
+{
+   matrix m;
+   vec3 l;
+   vec4 qx, qy, qz, qt, qrot;
+   int loc;
+   GdkGLContext *glcontext = gtk_widget_get_gl_context(widget);
+   GdkGLDrawable *gldrawable = gtk_widget_get_gl_drawable(widget);
+   GLhandleARB prog = 0;
+   
+   if(event->count > 0) return(1);
+   
+   if(!gdk_gl_drawable_gl_begin(gldrawable, glcontext))
+      return(1);
+   
+   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+   
+   if(_gl_error)
+   {
+      gdk_gl_drawable_swap_buffers(gldrawable);
+      gdk_gl_drawable_gl_end(gldrawable);
+      return(1);
+   }
+   
+   glMatrixMode(GL_MODELVIEW);
+   glLoadIdentity();
+   glRotatef(scene_rot[0], 1, 0, 0);
+   glRotatef(scene_rot[1], 0, 1, 0);
+   glRotatef(scene_rot[2], 0, 0, 1);
+   glTranslatef(0, 0, -zoom);
+   glRotatef(object_rot[0], 1, 0, 0);
+   glRotatef(object_rot[1], 0, 1, 0);
+   glRotatef(object_rot[2], 0, 0, 1);
+
+   glGetFloatv(GL_MODELVIEW_MATRIX, m);
+   mat_invert(m);
+   mat_transpose(m);
+
+   quat_ident(qx);
+   quat_ident(qy);
+   quat_ident(qz);
+   quat_rotate(qx, -light_rot[0], 1, 0, 0);
+   quat_rotate(qy, -light_rot[1], 0, 1, 0);
+   quat_rotate(qz, -light_rot[2], 0, 0, 1);
+   quat_mul(qt, qx, qy);
+   quat_mul(qrot, qt, qz);
+   vec4_normalize(qrot, qrot);
+   quat_get_direction(l, qrot);
+   
+   if(has_glsl)
+   {
+      prog = programs[bumpmapping];
+      glUseProgramObjectARB(prog);
+      loc = glGetUniformLocationARB(prog, "specular");
+      glUniform1iARB(loc, specular);
+      loc = glGetUniformLocationARB(prog, "ambient_color");
+      glUniform3fvARB(loc, 1, ambient_color);
+      loc = glGetUniformLocationARB(prog, "diffuse_color");
+      glUniform3fvARB(loc, 1, diffuse_color);
+      loc = glGetUniformLocationARB(prog, "specular_color");
+      glUniform3fvARB(loc, 1, specular_color);
+      loc = glGetUniformLocationARB(prog, "specular_exp");
+      glUniform1fARB(loc, specular_exp);
+      loc = glGetUniformLocationARB(prog, "lightDir");
+      glUniform3fvARB(loc, 1, l);
+   }
+
+   switch(object_type)
+   {
+      case OBJECT_QUAD:
+         draw_quad(l, m);
+         break;
+      case OBJECT_CUBE:
+         draw_cube(l, m);
+         break;
+      case OBJECT_SPHERE:
+         draw_sphere(l, m);
+         break;
+      default:
+         break;
+   }
+
+   if(has_glsl)
+      glUseProgramObjectARB(0);
       
    gdk_gl_drawable_swap_buffers(gldrawable);
    gdk_gl_drawable_gl_end(gldrawable);
@@ -1161,7 +1428,7 @@ static gint motion_notify(GtkWidget *widget, GdkEventMotion *event)
    if(state & GDK_BUTTON1_MASK)
    {
       rot[1] += cosf(rot[0] / 180.0f * M_PI) * dx;
-      //rot[2] -= sinf(rot[0] / 180.0f * M_PI) * dx;
+      rot[2] -= sinf(rot[0] / 180.0f * M_PI) * dx;
       rot[0] += dy;
    }
    else if(state & GDK_BUTTON3_MASK)
@@ -1379,6 +1646,12 @@ static void glossmap_callback(gint32 id, gpointer data)
    gtk_widget_queue_draw(glarea);
 }
 
+static void object_selected(GtkWidget *widget, gpointer data)
+{
+   object_type = (int)data;
+   gtk_widget_queue_draw(glarea);
+}
+
 static void bumpmapping_clicked(GtkWidget *widget, gpointer data)
 {
    bumpmapping = (int)data;
@@ -1446,6 +1719,7 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
    specular_color[0] = specular_color[1] = specular_color[2] = 1.0f;
    
    gtk_toggle_tool_button_set_active(GTK_TOGGLE_TOOL_BUTTON(rotate_obj_btn), 1);
+   gtk_option_menu_set_history(GTK_OPTION_MENU(object_opt), 0);
    gtk_option_menu_set_history(GTK_OPTION_MENU(bumpmapping_opt), 0);
    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(specular_check), 0);
    gtk_range_set_value(GTK_RANGE(specular_exp_range), specular_exp);
@@ -1460,6 +1734,7 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
    bumpmapping = 0;
    specular = 0;
    rotate_type = ROTATE_OBJECT;
+   object_type = OBJECT_QUAD;
    
    gtk_widget_queue_draw(glarea);
 }
@@ -1475,6 +1750,7 @@ void show_3D_preview(GimpDrawable *drawable)
    GtkWidget *check;
    GtkWidget *btn;
    GtkWidget *hscale;
+   GtkWidget *label;
    GtkWidget *toolbar;
    GtkToolItem *toolbtn;
    GtkTooltips *tooltips;
@@ -1483,6 +1759,10 @@ void show_3D_preview(GimpDrawable *drawable)
    GSList *group = 0;
    GdkGLConfig *glconfig;
    GimpRGB color;
+   const char *object_strings[OBJECT_MAX] =
+   {
+      "Quad", "Cube", "Sphere"
+   };
    const char *bumpmap_strings[BUMPMAP_MAX] =
    {
       "Normal", "Parallax", "Parallax Occlusion", "Relief"
@@ -1586,6 +1866,40 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
    gtk_signal_connect(GTK_OBJECT(toolbtn), "clicked",
                       GTK_SIGNAL_FUNC(toggle_fullscreen), 0);
+
+   toolbtn = gtk_separator_tool_item_new();
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+   
+   toolbtn = gtk_tool_item_new();
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+   label = gtk_label_new("Object type: ");
+   gtk_widget_show(label);
+   gtk_container_add(GTK_CONTAINER(toolbtn), label);
+
+   toolbtn = gtk_tool_item_new();
+   gtk_widget_show(GTK_WIDGET(toolbtn));
+   gtk_container_add(GTK_CONTAINER(toolbar), GTK_WIDGET(toolbtn));
+   
+   opt = gtk_option_menu_new();
+   object_opt = opt;
+   gtk_widget_show(opt);
+   gtk_container_add(GTK_CONTAINER(toolbtn), opt);
+      
+   menu = gtk_menu_new();
+
+   for(i = 0; i < OBJECT_MAX; ++i)
+   {
+      menuitem = gtk_menu_item_new_with_label(object_strings[i]);
+      gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+                         GTK_SIGNAL_FUNC(object_selected),
+                         (gpointer)i);
+      gtk_widget_show(menuitem);
+      gtk_menu_append(GTK_MENU(menu), menuitem);
+   }
+   
+	gtk_option_menu_set_menu(GTK_OPTION_MENU(opt), menu);
    
    glarea = gtk_drawing_area_new();
    gtk_widget_set_usize(glarea, 500, 300);
