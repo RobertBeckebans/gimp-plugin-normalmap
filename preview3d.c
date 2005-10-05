@@ -655,8 +655,8 @@ static void init(GtkWidget *widget, gpointer data)
    glEnable(GL_TEXTURE_2D);
    glBindTexture(GL_TEXTURE_2D, white_tex);
 
-   //has_glsl = GLEW_ARB_shader_objects && GLEW_ARB_vertex_shader && 
-   //   GLEW_ARB_fragment_shader;
+   has_glsl = GLEW_ARB_shader_objects && GLEW_ARB_vertex_shader && 
+      GLEW_ARB_fragment_shader;
    
    if(has_glsl)
    {

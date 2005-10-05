@@ -1124,13 +1124,13 @@ static void filter_type_selected(GtkWidget *widget, gpointer data)
 
 static void minz_changed(GtkWidget *widget, gpointer data)
 {
-   nmapvals.minz = gtk_spin_button_get_value(GTK_SPIN_BUTTON(data));
+   nmapvals.minz = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
    update_preview = 1;
 }
 
 static void scale_changed(GtkWidget *widget, gpointer data)
 {
-   nmapvals.scale = gtk_spin_button_get_value(GTK_SPIN_BUTTON(data));
+   nmapvals.scale = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
    update_preview = 1;
 }
 
@@ -1219,7 +1219,7 @@ static void dudv_selected(GtkWidget *widget, gpointer data)
 
 static void contrast_changed(GtkWidget *widget, gpointer data)
 {
-   nmapvals.contrast = gtk_spin_button_get_value(GTK_SPIN_BUTTON(data));
+   nmapvals.contrast = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
    update_preview = 1;
 }
 
@@ -1431,8 +1431,8 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.01, 5);
    gtk_widget_show(spin);
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
-   gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
-                      GTK_SIGNAL_FUNC(minz_changed), spin);
+   gtk_signal_connect(GTK_OBJECT(spin), "value_changed",
+                      GTK_SIGNAL_FUNC(minz_changed), 0);
 	gimp_table_attach_aligned(GTK_TABLE(table), 0, 1, "Minimum Z:", 0, 0.5,
                              spin, 1, 0);
 
@@ -1440,8 +1440,8 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 1, 5);
    gtk_widget_show(spin);
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
-   gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
-                      GTK_SIGNAL_FUNC(scale_changed), spin);
+   gtk_signal_connect(GTK_OBJECT(spin), "value_changed",
+                      GTK_SIGNAL_FUNC(scale_changed), 0);
 	gimp_table_attach_aligned(GTK_TABLE(table), 0, 2, "Scale:", 0, 0.5,
                              spin, 1, 0);
 
@@ -1680,8 +1680,8 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.01, 5);
    gtk_widget_show(spin);
    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
-   gtk_signal_connect(GTK_OBJECT(adj), "value_changed",
-                      GTK_SIGNAL_FUNC(contrast_changed), spin);
+   gtk_signal_connect(GTK_OBJECT(spin), "value_changed",
+                      GTK_SIGNAL_FUNC(contrast_changed), 0);
 	gimp_table_attach_aligned(GTK_TABLE(table), 0, 7, "Contrast:", 0, 0.5,
                              spin, 1, 0);
 
