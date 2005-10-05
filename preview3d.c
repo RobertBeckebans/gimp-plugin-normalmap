@@ -46,6 +46,7 @@
 typedef float matrix[16];
 typedef float vec4[4];
 typedef float vec3[3];
+typedef float vec2[2];
 
 typedef enum
 {
@@ -80,6 +81,8 @@ static GtkWidget *specular_exp_range = 0;
 static GtkWidget *ambient_color_btn = 0;
 static GtkWidget *diffuse_color_btn = 0;
 static GtkWidget *specular_color_btn = 0;
+static GtkWidget *uvscale_spin1 = 0;
+static GtkWidget *uvscale_spin2 = 0;
 
 static int fullscreen = 0;
 
@@ -120,10 +123,12 @@ static const char *vert_source =
    "varying vec3 tangent;\n"
    "varying vec3 binormal;\n"
    "\n"
+   "uniform vec2 uvscale;\n"
+   "\n"
    "void main()\n"
    "{\n"
    "   gl_Position = ftransform();\n"
-   "   tex = gl_MultiTexCoord0.xy;\n"
+   "   tex = gl_MultiTexCoord0.xy * uvscale;\n"
    "   vpos = (gl_ModelViewMatrix * gl_Vertex).xyz;\n"
    "   tangent  = gl_NormalMatrix * gl_MultiTexCoord3.xyz;\n"
    "   binormal = gl_NormalMatrix * gl_MultiTexCoord4.xyz;\n"
@@ -406,6 +411,7 @@ static vec3 ambient_color = {0.2f, 0.2f, 0.2f};
 static vec3 diffuse_color = {1, 1, 1};
 static vec3 specular_color = {1, 1, 1};
 static float specular_exp = 32.0f;
+static vec3 uvscale = {1, 1};
 
 static int mx;
 static int my;
@@ -649,8 +655,8 @@ static void init(GtkWidget *widget, gpointer data)
    glEnable(GL_TEXTURE_2D);
    glBindTexture(GL_TEXTURE_2D, white_tex);
 
-   has_glsl = GLEW_ARB_shader_objects && GLEW_ARB_vertex_shader && 
-      GLEW_ARB_fragment_shader;
+   //has_glsl = GLEW_ARB_shader_objects && GLEW_ARB_vertex_shader && 
+   //   GLEW_ARB_fragment_shader;
    
    if(has_glsl)
    {
@@ -967,6 +973,7 @@ static void draw_object(int obj, vec3 l, matrix m)
    const int vsize = 16 * sizeof(float);
    int i;
    vec3 c, t, b, n;
+   vec2 uv;
    float *verts;
    unsigned short *indices;
    
@@ -1030,11 +1037,14 @@ static void draw_object(int obj, vec3 l, matrix m)
          c[1] = c[1] * 0.5f + 0.5f;
          c[2] = c[2] * 0.5f + 0.5f;
          
+         uv[0] = verts[16 * indices[i] + 4] * uvscale[0];
+         uv[1] = verts[16 * indices[i] + 5] * uvscale[1];
+         
          glColor3fv(c);
          glNormal3fv(&verts[16 * indices[i] + 12]);
-         glMultiTexCoord2fv(GL_TEXTURE0, &verts[16 * indices[i] + 4]);
-         glMultiTexCoord2fv(GL_TEXTURE1, &verts[16 * indices[i] + 4]);
-         glMultiTexCoord2fv(GL_TEXTURE2, &verts[16 * indices[i] + 4]);
+         glMultiTexCoord2fv(GL_TEXTURE0, uv);
+         glMultiTexCoord2fv(GL_TEXTURE1, uv);
+         glMultiTexCoord2fv(GL_TEXTURE2, uv);
          glVertex3fv(&verts[16 * indices[i]]);
       }
       glEnd();
@@ -1106,6 +1116,8 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
       glUniform1fARB(loc, specular_exp);
       loc = glGetUniformLocationARB(prog, "lightDir");
       glUniform3fvARB(loc, 1, l);
+      loc = glGetUniformLocationARB(prog, "uvscale");
+      glUniform2fvARB(loc, 1, uvscale);
    }
    
    draw_object(object_type, l, m);
@@ -1465,6 +1477,30 @@ static void rotate_type_toggled(GtkWidget *widget, gpointer data)
       rotate_type = (int)data;
 }
 
+static void uvscale_changed(GtkWidget *widget, gpointer data)
+{
+   int n = (int)data;
+   float v = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
+   GtkWidget *btn = g_object_get_data(G_OBJECT(widget), "chain");
+
+   uvscale[n] = v;
+   if(gimp_chain_button_get_active(GIMP_CHAIN_BUTTON(btn)))
+   {
+      if(n == 0)
+      {
+         uvscale[1] = v;
+         gtk_spin_button_set_value(GTK_SPIN_BUTTON(uvscale_spin2), v);
+      }
+      else
+      {
+         uvscale[0] = v;
+         gtk_spin_button_set_value(GTK_SPIN_BUTTON(uvscale_spin1), v);
+      }
+   }
+      
+   gtk_widget_queue_draw(glarea);
+}
+
 static void reset_view_clicked(GtkWidget *widget, gpointer data)
 {
    GimpRGB c;
@@ -1478,12 +1514,15 @@ static void reset_view_clicked(GtkWidget *widget, gpointer data)
    ambient_color[0] = ambient_color[1] = ambient_color[2] = 0.2f;
    diffuse_color[0] = diffuse_color[1] = diffuse_color[2] = 1.0f;
    specular_color[0] = specular_color[1] = specular_color[2] = 1.0f;
+   uvscale[0] = uvscale[1] = 1;
    
    gtk_toggle_tool_button_set_active(GTK_TOGGLE_TOOL_BUTTON(rotate_obj_btn), 1);
    gtk_option_menu_set_history(GTK_OPTION_MENU(object_opt), 0);
    gtk_option_menu_set_history(GTK_OPTION_MENU(bumpmapping_opt), 0);
    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(specular_check), 0);
    gtk_range_set_value(GTK_RANGE(specular_exp_range), specular_exp);
+   gtk_spin_button_set_value(GTK_SPIN_BUTTON(uvscale_spin1), uvscale[0]);
+   gtk_spin_button_set_value(GTK_SPIN_BUTTON(uvscale_spin2), uvscale[1]);
    
    gimp_rgb_set(&c, ambient_color[0], ambient_color[1], ambient_color[2]);
    gimp_color_button_set_color(GIMP_COLOR_BUTTON(ambient_color_btn), &c);
@@ -1504,7 +1543,7 @@ void show_3D_preview(GimpDrawable *drawable)
 {
    int i;
    GtkWidget *vbox;
-   GtkWidget *table;
+   GtkWidget *table, *table2;
    GtkWidget *opt;
    GtkWidget *menu;
    GtkWidget *menuitem;
@@ -1512,6 +1551,8 @@ void show_3D_preview(GimpDrawable *drawable)
    GtkWidget *btn;
    GtkWidget *hscale;
    GtkWidget *label;
+   GtkObject *adj;
+   GtkWidget *spin;
    GtkWidget *toolbar;
    GtkToolItem *toolbtn;
    GtkTooltips *tooltips;
@@ -1535,6 +1576,7 @@ void show_3D_preview(GimpDrawable *drawable)
    ambient_color[0] = ambient_color[1] = ambient_color[2] = 0.2f;
    diffuse_color[0] = diffuse_color[1] = diffuse_color[2] = 1.0f;
    specular_color[0] = specular_color[1] = specular_color[2] = 1.0f;
+   uvscale[0] = uvscale[1] = 1;
    
    if(_active) return;
    
@@ -1681,7 +1723,7 @@ void show_3D_preview(GimpDrawable *drawable)
    
    gtk_box_pack_start(GTK_BOX(vbox), glarea, 1, 1, 0);
 
-   table = gtk_table_new(9, 2, 0);
+   table = gtk_table_new(11, 2, 0);
    controls_table = table;
    gtk_container_set_border_width(GTK_CONTAINER(table), 5);
    gtk_table_set_col_spacings(GTK_TABLE(table), 5);
@@ -1771,9 +1813,48 @@ void show_3D_preview(GimpDrawable *drawable)
    gtk_signal_connect(GTK_OBJECT(btn), "color_changed",
                       GTK_SIGNAL_FUNC(color_changed), (gpointer)specular_color);
    
+   table2 = gtk_table_new(2, 2, 0);
+   gtk_widget_show(table2);
+   gtk_table_set_col_spacings(GTK_TABLE(table2), 5);
+   gtk_table_set_row_spacings(GTK_TABLE(table2), 5);
+   gimp_table_attach_aligned(GTK_TABLE(table), 0, 8, "UV scale:", 0, 0.5,
+                             table2, 1, 0);
+   
+   adj = gtk_adjustment_new(1, 0, 1000, 1, 10, 10);
+   spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 1, 4);
+   uvscale_spin1 = spin;
+   gtk_widget_show(spin);
+   gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
+   gtk_signal_connect(GTK_OBJECT(spin), "value_changed",
+                      GTK_SIGNAL_FUNC(uvscale_changed), (gpointer)0);
+   gtk_table_attach(GTK_TABLE(table2), spin, 0, 1, 0, 1,
+                    (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
+                    (GtkAttachOptions)(0), 0, 0);
+
+   adj = gtk_adjustment_new(1, 0, 1000, 1, 10, 10);
+   spin = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 1, 4);
+   uvscale_spin2 = spin;
+   gtk_widget_show(spin);
+   gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
+   gtk_signal_connect(GTK_OBJECT(spin), "value_changed",
+                      GTK_SIGNAL_FUNC(uvscale_changed), (gpointer)1);
+   gtk_table_attach(GTK_TABLE(table2), spin, 0, 1, 1, 2,
+                    (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
+                    (GtkAttachOptions)(0), 0, 0);
+   
+   btn = gimp_chain_button_new(GIMP_CHAIN_RIGHT);
+   gtk_widget_show(btn);
+   gimp_chain_button_set_active(GIMP_CHAIN_BUTTON(btn), 1);
+   gtk_table_attach(GTK_TABLE(table2), btn, 1, 2, 0, 2,
+                    (GtkAttachOptions)(0),
+                    (GtkAttachOptions)(0), 0, 0);
+   
+   g_object_set_data(G_OBJECT(uvscale_spin1), "chain", btn);
+   g_object_set_data(G_OBJECT(uvscale_spin2), "chain", btn);
+   
    btn = gtk_button_new_with_label("Reset view");
    gtk_widget_show(btn);
-   gtk_table_attach(GTK_TABLE(table), btn, 0, 2, 8, 9,
+   gtk_table_attach(GTK_TABLE(table), btn, 0, 2, 10, 11,
                     (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
                     (GtkAttachOptions)(0), 0, 0);
    gtk_signal_connect(GTK_OBJECT(btn), "clicked",
