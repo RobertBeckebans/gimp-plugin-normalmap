@@ -30,6 +30,10 @@
 
 #include "scale.h"
 
+#include "objects/sphere.h"
+#include "objects/torus.h"
+#include "objects/teapot.h"
+
 #include "pixmaps/object.xpm"
 #include "pixmaps/light.xpm"
 #include "pixmaps/scene.xpm"
@@ -55,7 +59,7 @@ typedef enum
 
 typedef enum
 {
-   OBJECT_QUAD = 0, OBJECT_CUBE, OBJECT_SPHERE,
+   OBJECT_QUAD = 0, OBJECT_CUBE, OBJECT_SPHERE, OBJECT_TORUS, OBJECT_TEAPOT,
    OBJECT_MAX
 } OBJECT_TYPE;
 
@@ -81,6 +85,10 @@ static GLuint diffuse_tex = 0;
 static GLuint gloss_tex = 0;
 static GLuint normal_tex = 0;
 static GLuint white_tex = 0;
+
+static GLuint sphere_vbo = 0;
+static GLuint torus_vbo = 0;
+static GLuint teapot_vbo = 0;
 
 static const float anisotropy = 4.0f;
 
@@ -269,6 +277,7 @@ static const char *pom_frag_source =
    "   vec3 N = texture2D(sNormal, uv).xyz * 2.0 - 1.0;\n"
    "   vec3 diffuse = texture2D(sDiffuse, uv).rgb;\n"
    "\n"
+   "   N.z = sqrt(1.0 - dot(N.xy, N.xy));\n"
    "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
    "\n"
    "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
@@ -324,7 +333,7 @@ static const char *relief_frag_source =
    "   }\n"
    "   depth = best_depth;\n"
    "\n"
-   "   const int binary_search_steps = 6;\n"
+   "   const int binary_search_steps = 5;\n"
    "\n"
    "   for(int i = 0; i < binary_search_steps; ++i)\n"
    "   {\n"
@@ -356,6 +365,7 @@ static const char *relief_frag_source =
    "   vec3 N = texture2D(sNormal, uv).xyz * 2.0 - 1.0;\n"
    "   vec3 diffuse = texture2D(sDiffuse, uv).rgb;\n"
    "\n"
+   "   N.z = sqrt(1.0 - dot(N.xy, N.xy));\n"
    "   N = normalize(N.x * tangent + N.y * binormal + N.z * normal);\n"
    "\n"
    "   float NdotL = clamp(dot(N, lightDir), 0.0, 1.0);\n"
@@ -452,6 +462,13 @@ static inline void vec3_set(vec3 v, float x, float y, float z)
    v[0] = x;
    v[1] = y;
    v[2] = z;
+}
+
+static inline void vec3_copy(vec3 r, vec3 v)
+{
+   r[0] = v[0];
+   r[1] = v[1];
+   r[2] = v[2];
 }
 
 static void vec4_normalize(vec4 r, vec4 v)
@@ -892,6 +909,23 @@ static void init(GtkWidget *widget, gpointer data)
       
       glUseProgramObjectARB(0);
       
+      glGenBuffersARB(1, &sphere_vbo);
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, sphere_vbo);
+      glBufferDataARB(GL_ARRAY_BUFFER_ARB, SPHERE_NUM_VERTS * 16 * sizeof(float),
+                      sphere_verts, GL_STATIC_DRAW_ARB);
+ 
+      glGenBuffersARB(1, &torus_vbo);
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, torus_vbo);
+      glBufferDataARB(GL_ARRAY_BUFFER_ARB, TORUS_NUM_VERTS * 16 * sizeof(float),
+                      torus_verts, GL_STATIC_DRAW_ARB);
+     
+      glGenBuffersARB(1, &teapot_vbo);
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, teapot_vbo);
+      glBufferDataARB(GL_ARRAY_BUFFER_ARB, TEAPOT_NUM_VERTS * 16 * sizeof(float),
+                      teapot_verts, GL_STATIC_DRAW_ARB);
+      
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
+      
       menu = gtk_option_menu_get_menu(GTK_OPTION_MENU(bumpmapping_opt));
       curr = gtk_container_get_children(GTK_CONTAINER(menu));
       for(i = 0; i < BUMPMAP_MAX && curr; ++i)
@@ -916,7 +950,7 @@ static void init(GtkWidget *widget, gpointer data)
    light_rot[0] = light_rot[1] = light_rot[2] = 0;
    scene_rot[0] = scene_rot[1] = scene_rot[2] = 0;
    zoom = 2;
-
+   
    gdk_gl_drawable_gl_end(gldrawable);
 }
 
@@ -1011,6 +1045,7 @@ static void draw_quad(vec3 l, matrix m)
 static void draw_cube(vec3 l, matrix m)
 {
    vec3 c, t, b, n;
+   const float cube_size = 0.65f;
    
    vec3_set(t, 1,  0,  0);
    vec3_set(b, 0, -1,  0);
@@ -1038,22 +1073,22 @@ static void draw_cube(vec3 l, matrix m)
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
-      glVertex3f(-1, 1, 1);
+      glVertex3f(-cube_size, cube_size, cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
-      glVertex3f(-1, -1, 1);
+      glVertex3f(-cube_size, -cube_size, cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
-      glVertex3f(1, 1, 1);
+      glVertex3f(cube_size, cube_size, cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
-      glVertex3f(1, -1, 1);
+      glVertex3f(cube_size, -cube_size, cube_size);
    }
    glEnd();
 
@@ -1076,22 +1111,22 @@ static void draw_cube(vec3 l, matrix m)
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
-      glVertex3f(-1,  1, -1);
+      glVertex3f(-cube_size,  cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
-      glVertex3f(-1, -1, -1);
+      glVertex3f(-cube_size, -cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
-      glVertex3f( 1,  1, -1);
+      glVertex3f( cube_size,  cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
-      glVertex3f( 1, -1, -1);
+      glVertex3f( cube_size, -cube_size, -cube_size);
    }
    glEnd();
    
@@ -1121,22 +1156,22 @@ static void draw_cube(vec3 l, matrix m)
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
-      glVertex3f(-1, 1, -1);
+      glVertex3f(-cube_size, cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
-      glVertex3f(-1, -1, -1);
+      glVertex3f(-cube_size, -cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
-      glVertex3f(-1, 1, 1);
+      glVertex3f(-cube_size, cube_size, cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
-      glVertex3f(-1, -1, 1);
+      glVertex3f(-cube_size, -cube_size, cube_size);
    }
    glEnd();
 
@@ -1159,22 +1194,22 @@ static void draw_cube(vec3 l, matrix m)
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
-      glVertex3f(1,  1, -1);
+      glVertex3f(cube_size,  cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
-      glVertex3f(1, -1, -1);
+      glVertex3f(cube_size, -cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
-      glVertex3f(1,  1,  1);
+      glVertex3f(cube_size,  cube_size,  cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
-      glVertex3f(1, -1,  1);
+      glVertex3f(cube_size, -cube_size,  cube_size);
    }
    glEnd();
    
@@ -1204,22 +1239,22 @@ static void draw_cube(vec3 l, matrix m)
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
-      glVertex3f(-1, 1, -1);
+      glVertex3f(-cube_size, cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
-      glVertex3f(-1, 1, 1);
+      glVertex3f(-cube_size, cube_size, cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
-      glVertex3f(1, 1, -1);
+      glVertex3f(cube_size, cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
-      glVertex3f(1, 1, 1);
+      glVertex3f(cube_size, cube_size, cube_size);
    }
    glEnd();
 
@@ -1242,29 +1277,228 @@ static void draw_cube(vec3 l, matrix m)
       glMultiTexCoord2f(GL_TEXTURE0, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 0);
-      glVertex3f(-1, -1, -1);
+      glVertex3f(-cube_size, -cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 0, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 0, 1);
-      glVertex3f(-1, -1,  1);
+      glVertex3f(-cube_size, -cube_size,  cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 0);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 0);
-      glVertex3f( 1, -1, -1);
+      glVertex3f( cube_size, -cube_size, -cube_size);
 
       glMultiTexCoord2f(GL_TEXTURE0, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE1, 1, 1);
       glMultiTexCoord2f(GL_TEXTURE2, 1, 1);
-      glVertex3f( 1, -1, 1);
+      glVertex3f( cube_size, -cube_size, cube_size);
    }
    glEnd();
 }
 
 static void draw_sphere(vec3 l, matrix m)
 {
-   
+   const int vsize = 16 * sizeof(float);
+   int i;
+   vec3 c, t, b, n;
+
+   if(has_glsl)
+   {
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, sphere_vbo);
+      
+      glVertexPointer(4, GL_FLOAT, vsize, (void*)0);
+      glNormalPointer(GL_FLOAT, vsize, (void*)(12 * sizeof(float)));
+      glActiveTexture(GL_TEXTURE4);
+      glTexCoordPointer(3, GL_FLOAT, vsize, (void*)(9 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE3);
+      glTexCoordPointer(3, GL_FLOAT, vsize, (void*)(6 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE0);
+      glTexCoordPointer(2, GL_FLOAT, vsize, (void*)(4 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glEnableClientState(GL_VERTEX_ARRAY);
+      glEnableClientState(GL_NORMAL_ARRAY);
+      
+      glDrawElements(GL_TRIANGLES, SPHERE_NUM_INDICES,
+                     GL_UNSIGNED_SHORT, sphere_indices);
+      
+      glDisableClientState(GL_VERTEX_ARRAY);
+      glDisableClientState(GL_NORMAL_ARRAY);
+      glActiveTexture(GL_TEXTURE4);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE3);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE0);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
+   }
+   else
+   {
+      glBegin(GL_TRIANGLES);
+      for(i = 0; i < SPHERE_NUM_INDICES; ++i)
+      {
+         vec3_copy(t, &sphere_verts[sphere_indices[i]][ 6]);
+         vec3_copy(b, &sphere_verts[sphere_indices[i]][ 9]);
+         vec3_copy(n, &sphere_verts[sphere_indices[i]][12]);
+         mat_mult_vec(t, m);
+         mat_mult_vec(b, m);
+         mat_mult_vec(n, m);
+         c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+         c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+         c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+         vec3_normalize(c, c);
+         c[0] = c[0] * 0.5f + 0.5f;
+         c[1] = c[1] * 0.5f + 0.5f;
+         c[2] = c[2] * 0.5f + 0.5f;
+         
+         glColor3fv(c);
+         glNormal3fv(&sphere_verts[sphere_indices[i]][12]);
+         glMultiTexCoord2fv(GL_TEXTURE0, &sphere_verts[sphere_indices[i]][4]);
+         glMultiTexCoord2fv(GL_TEXTURE1, &sphere_verts[sphere_indices[i]][4]);
+         glMultiTexCoord2fv(GL_TEXTURE2, &sphere_verts[sphere_indices[i]][4]);
+         glVertex3fv(&sphere_verts[sphere_indices[i]][0]);
+      }
+      glEnd();
+   }
+}
+
+static void draw_torus(vec3 l, matrix m)
+{
+   const int vsize = 16 * sizeof(float);
+   int i;
+   vec3 c, t, b, n;
+
+   if(has_glsl)
+   {
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, torus_vbo);
+      
+      glVertexPointer(4, GL_FLOAT, vsize, (void*)0);
+      glNormalPointer(GL_FLOAT, vsize, (void*)(12 * sizeof(float)));
+      glActiveTexture(GL_TEXTURE4);
+      glTexCoordPointer(3, GL_FLOAT, vsize, (void*)(9 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE3);
+      glTexCoordPointer(3, GL_FLOAT, vsize, (void*)(6 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE0);
+      glTexCoordPointer(2, GL_FLOAT, vsize, (void*)(4 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glEnableClientState(GL_VERTEX_ARRAY);
+      glEnableClientState(GL_NORMAL_ARRAY);
+      
+      glDrawElements(GL_TRIANGLES, TORUS_NUM_INDICES,
+                     GL_UNSIGNED_SHORT, torus_indices);
+      
+      glDisableClientState(GL_VERTEX_ARRAY);
+      glDisableClientState(GL_NORMAL_ARRAY);
+      glActiveTexture(GL_TEXTURE4);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE3);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE0);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
+   }
+   else
+   {
+      glBegin(GL_TRIANGLES);
+      for(i = 0; i < TORUS_NUM_INDICES; ++i)
+      {
+         vec3_copy(t, &torus_verts[torus_indices[i]][ 6]);
+         vec3_copy(b, &torus_verts[torus_indices[i]][ 9]);
+         vec3_copy(n, &torus_verts[torus_indices[i]][12]);
+         mat_mult_vec(t, m);
+         mat_mult_vec(b, m);
+         mat_mult_vec(n, m);
+         c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+         c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+         c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+         vec3_normalize(c, c);
+         c[0] = c[0] * 0.5f + 0.5f;
+         c[1] = c[1] * 0.5f + 0.5f;
+         c[2] = c[2] * 0.5f + 0.5f;
+         
+         glColor3fv(c);
+         glNormal3fv(&torus_verts[torus_indices[i]][12]);
+         glMultiTexCoord2fv(GL_TEXTURE0, &torus_verts[torus_indices[i]][4]);
+         glMultiTexCoord2fv(GL_TEXTURE1, &torus_verts[torus_indices[i]][4]);
+         glMultiTexCoord2fv(GL_TEXTURE2, &torus_verts[torus_indices[i]][4]);
+         glVertex3fv(&torus_verts[torus_indices[i]][0]);
+      }
+      glEnd();
+   }
+}
+
+static void draw_teapot(vec3 l, matrix m)
+{
+   const int vsize = 16 * sizeof(float);
+   int i;
+   vec3 c, t, b, n;
+
+   if(has_glsl)
+   {
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, teapot_vbo);
+      
+      glVertexPointer(4, GL_FLOAT, vsize, (void*)0);
+      glNormalPointer(GL_FLOAT, vsize, (void*)(12 * sizeof(float)));
+      glActiveTexture(GL_TEXTURE4);
+      glTexCoordPointer(3, GL_FLOAT, vsize, (void*)(9 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE3);
+      glTexCoordPointer(3, GL_FLOAT, vsize, (void*)(6 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE0);
+      glTexCoordPointer(2, GL_FLOAT, vsize, (void*)(4 * sizeof(float)));
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+      glEnableClientState(GL_VERTEX_ARRAY);
+      glEnableClientState(GL_NORMAL_ARRAY);
+      
+      glDrawElements(GL_TRIANGLES, TEAPOT_NUM_INDICES,
+                     GL_UNSIGNED_SHORT, teapot_indices);
+      
+      glDisableClientState(GL_VERTEX_ARRAY);
+      glDisableClientState(GL_NORMAL_ARRAY);
+      glActiveTexture(GL_TEXTURE4);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE3);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      glActiveTexture(GL_TEXTURE0);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      
+      glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
+   }
+   else
+   {
+      glBegin(GL_TRIANGLES);
+      for(i = 0; i < TEAPOT_NUM_INDICES; ++i)
+      {
+         vec3_copy(t, &teapot_verts[teapot_indices[i]][ 6]);
+         vec3_copy(b, &teapot_verts[teapot_indices[i]][ 9]);
+         vec3_copy(n, &teapot_verts[teapot_indices[i]][12]);
+         mat_mult_vec(t, m);
+         mat_mult_vec(b, m);
+         mat_mult_vec(n, m);
+         c[0] = (l[0] * t[0] + l[1] * t[1] + l[2] * t[2]);
+         c[1] = (l[0] * b[0] + l[1] * b[1] + l[2] * b[2]);
+         c[2] = (l[0] * n[0] + l[1] * n[1] + l[2] * n[2]);
+         vec3_normalize(c, c);
+         c[0] = c[0] * 0.5f + 0.5f;
+         c[1] = c[1] * 0.5f + 0.5f;
+         c[2] = c[2] * 0.5f + 0.5f;
+         
+         glColor3fv(c);
+         glNormal3fv(&teapot_verts[teapot_indices[i]][12]);
+         glMultiTexCoord2fv(GL_TEXTURE0, &teapot_verts[teapot_indices[i]][4]);
+         glMultiTexCoord2fv(GL_TEXTURE1, &teapot_verts[teapot_indices[i]][4]);
+         glMultiTexCoord2fv(GL_TEXTURE2, &teapot_verts[teapot_indices[i]][4]);
+         glVertex3fv(&teapot_verts[teapot_indices[i]][0]);
+      }
+      glEnd();
+   }
 }
 
 static gint expose(GtkWidget *widget, GdkEventExpose *event)
@@ -1344,6 +1578,12 @@ static gint expose(GtkWidget *widget, GdkEventExpose *event)
          break;
       case OBJECT_SPHERE:
          draw_sphere(l, m);
+         break;
+      case OBJECT_TORUS:
+         draw_torus(l, m);
+         break;
+      case OBJECT_TEAPOT:
+         draw_teapot(l, m);
          break;
       default:
          break;
@@ -1761,7 +2001,7 @@ void show_3D_preview(GimpDrawable *drawable)
    GimpRGB color;
    const char *object_strings[OBJECT_MAX] =
    {
-      "Quad", "Cube", "Sphere"
+      "Quad", "Cube", "Sphere", "Torus", "Teapot"
    };
    const char *bumpmap_strings[BUMPMAP_MAX] =
    {
