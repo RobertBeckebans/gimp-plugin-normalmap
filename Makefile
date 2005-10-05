@@ -37,7 +37,7 @@ install: all
 	$(CC) -c $(CFLAGS) $<
 	  
 normalmap.o: normalmap.c scale.h preview3d.h Makefile
-preview3d.o: preview3d.c scale.h  objects/sphere.h objects/torus.h \
-objects/teapot.h pixmaps/object.xpm pixmaps/light.xpm pixmaps/scene.xpm \
-pixmaps/full.xpm Makefile
+preview3d.o: preview3d.c scale.h  objects/cube.h objects/quad.h \
+objects/sphere.h objects/torus.h objects/teapot.h pixmaps/object.xpm \
+pixmaps/light.xpm pixmaps/scene.xpm pixmaps/full.xpm Makefile
 scale.o: scale.c Makefile
