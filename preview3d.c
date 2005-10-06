@@ -413,6 +413,8 @@ static vec3 specular_color = {1, 1, 1};
 static float specular_exp = 32.0f;
 static vec3 uvscale = {1, 1};
 
+static const float depth_factor = 0.05f;
+
 static int mx;
 static int my;
 static vec3 object_rot;
@@ -911,7 +913,7 @@ static void init(GtkWidget *widget, gpointer data)
          loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "sGloss");
          glUniform1iARB(loc, 2);
          loc = glGetUniformLocationARB(programs[BUMPMAP_POM], "depth_factor");
-         glUniform1fARB(loc, 0.05f);
+         glUniform1fARB(loc, depth_factor);
       }
       
       if(programs[BUMPMAP_RELIEF])
@@ -924,7 +926,7 @@ static void init(GtkWidget *widget, gpointer data)
          loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "sGloss");
          glUniform1iARB(loc, 2);
          loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "depth_factor");
-         glUniform1fARB(loc, 0.05f);
+         glUniform1fARB(loc, depth_factor);
       }
       
       glUseProgramObjectARB(0);

@@ -289,23 +289,45 @@ static void rotate_array(float *dst, float *src, int size)
 static int sample_alpha_map(unsigned char *pixels, int x, int y,
                             int w, int h, int sw, int sh)
 {
-   int row = w;
-   float xs, ys, dx, dy;
-   int xfl, yfl;
-   float height = 0;
-   unsigned char *src;
+   float fx, fy, dx, dy;
+   float v, r0, r1, r2, r3;
+   int ix, iy;
    
-   xs = ((float)x / (float)sw) * (float)w;
-   ys = ((float)y / (float)sh) * (float)h;
-   xfl = (int)floor(xs);
-   yfl = (int)floor(ys);
-   dx = xs - (float)xfl;
-   dy = ys - (float)yfl;
-   src = &pixels[yfl * row + xfl];
-   height = LERP(LERP(src[0], src[1], dx),
-                 LERP(src[row], src[row + 1], dx),
-                 dy);
-   return((unsigned char)height);
+   fx = ((float)x / (float)sw) * (float)w;
+   fy = ((float)y / (float)sh) * (float)h;
+   ix = (int)floor(fx);
+   iy = (int)floor(fy);
+   dx = fx - (float)ix;
+   dy = fy - (float)iy;
+   
+#define VAL(x, y) \
+   (float)pixels[((y) < 0 ? 0 : (y) >= h ? h - 1 : (y)) * w + \
+                 ((x) < 0 ? 0 : (x) >= w ? w - 1 : (x))]
+   
+   r0 = cubic_interpolate(VAL(ix - 1, iy - 1),
+                          VAL(ix,     iy - 1),
+                          VAL(ix + 1, iy - 1),
+                          VAL(ix + 2, iy - 1), dx);
+   r1 = cubic_interpolate(VAL(ix - 1, iy    ),
+                          VAL(ix,     iy    ),
+                          VAL(ix + 1, iy    ),
+                          VAL(ix + 2, iy    ), dx);
+   r2 = cubic_interpolate(VAL(ix - 1, iy + 1),
+                          VAL(ix,     iy + 1),
+                          VAL(ix + 1, iy + 1),
+                          VAL(ix + 2, iy + 1), dx);
+   r3 = cubic_interpolate(VAL(ix - 1, iy + 2),
+                          VAL(ix,     iy + 2),
+                          VAL(ix + 1, iy + 2),
+                          VAL(ix + 2, iy + 2), dx);
+#undef VAL
+   
+   v = cubic_interpolate(r0, r1, r2, r3, dy);
+   
+   if(v <   0) v = 0;
+   if(v > 255) v = 255;
+   
+   return((unsigned char)v);
 }
 
 static void make_heightmap(unsigned char *image, int w, int h, int bpp)
