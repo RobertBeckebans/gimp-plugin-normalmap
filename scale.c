@@ -23,10 +23,15 @@
 
 float cubic_interpolate(float a, float b, float c, float d, float x)
 {
-   float r = ((-a + 3.0f * b - 3.0f * c + d) * x * x * x +
-              (2.0f * a - 5.0f * b + 4.0f * c - d) * x * x +
-              (-a + c) * x + 2.0f * b) * 0.5f;
-   return(r);
+   float v0, v1, v2, v3, x2;
+   
+   x2 = x * x;
+   v0 = d - c - a + b;
+   v1 = a - b - v0;
+   v2 = c - a;
+   v3 = b;
+   
+   return(v0 * x * x2 + v1 * x2 + v2 * x + v3);
 }
 
 void scale_pixels(unsigned char *dst, int dw, int dh,
