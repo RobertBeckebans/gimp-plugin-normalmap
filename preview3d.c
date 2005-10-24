@@ -782,7 +782,7 @@ static void init(GtkWidget *widget, gpointer data)
       }
       
       programs[BUMPMAP_PARALLAX] = prog;
-
+      
       if(max_instructions >= 200)
       {
          prog = glCreateProgramObjectARB();
@@ -932,7 +932,7 @@ static void init(GtkWidget *widget, gpointer data)
          loc = glGetUniformLocationARB(programs[BUMPMAP_RELIEF], "depth_factor");
          glUniform1fARB(loc, depth_factor);
       }
-      
+
       glUseProgramObjectARB(0);
 
       for(i = 0; i < OBJECT_MAX; ++i)
