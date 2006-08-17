@@ -110,8 +110,10 @@ static struct
 static const float anisotropy = 4.0f;
 
 static int has_glsl = 0;
+static int has_npot = 0;
 static int has_generate_mipmap = 0;
 static int has_aniso = 0;
+static int num_mtus = 0;
 
 static int max_instructions = 0;
 static int max_indirections = 0;
@@ -626,6 +628,8 @@ static void init(GtkWidget *widget, gpointer data)
    glGenTextures(1, &gloss_tex);
    glGenTextures(1, &normal_tex);
    glGenTextures(1, &white_tex);
+   
+   glGetIntegerv(GL_MAX_TEXTURE_UNITS, &num_mtus);
 
    glActiveTexture(GL_TEXTURE0);
    glEnable(GL_TEXTURE_2D);
@@ -652,13 +656,17 @@ static void init(GtkWidget *widget, gpointer data)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 4, 4, 0,
                 GL_LUMINANCE, GL_UNSIGNED_BYTE, white);
-   
-   glActiveTexture(GL_TEXTURE2);
-   glEnable(GL_TEXTURE_2D);
-   glBindTexture(GL_TEXTURE_2D, white_tex);
+
+   if(num_mtus > 2)
+   {
+      glActiveTexture(GL_TEXTURE2);
+      glEnable(GL_TEXTURE_2D);
+      glBindTexture(GL_TEXTURE_2D, white_tex);
+   }
 
    has_glsl = GLEW_ARB_shader_objects && GLEW_ARB_vertex_shader && 
       GLEW_ARB_fragment_shader;
+   has_npot = GLEW_ARB_texture_non_power_of_two;
    has_generate_mipmap = GLEW_SGIS_generate_mipmap;
    has_aniso = GLEW_EXT_texture_filter_anisotropic;
    
@@ -1048,7 +1056,8 @@ static void draw_object(int obj, vec3 l, matrix m)
          glNormal3fv(&verts[16 * indices[i] + 12]);
          glMultiTexCoord2fv(GL_TEXTURE0, uv);
          glMultiTexCoord2fv(GL_TEXTURE1, uv);
-         glMultiTexCoord2fv(GL_TEXTURE2, uv);
+         if(num_mtus > 2)
+            glMultiTexCoord2fv(GL_TEXTURE2, uv);
          glVertex3fv(&verts[16 * indices[i]]);
       }
       glEnd();
@@ -1323,8 +1332,7 @@ static void diffusemap_callback(gint32 id, gpointer data)
    gimp_pixel_rgn_init(&src_rgn, drawable, 0, 0, w, h, 0, 0);
    gimp_pixel_rgn_get_rect(&src_rgn, pixels, 0, 0, w, h);
 
-   if(!GLEW_ARB_texture_non_power_of_two &&
-      !(IS_POT(w) && IS_POT(h)))
+   if(!has_npot && !(IS_POT(w) && IS_POT(h)))
    {
       get_nearest_pot(w, h, &w_pot, &h_pot);
       tmp = g_malloc(h_pot * w_pot * bpp);
@@ -1384,6 +1392,7 @@ static void glossmap_callback(gint32 id, gpointer data)
    GLenum type = 0;
    
    if(_gl_error) return;
+   if(num_mtus < 3) return;
    
    if(id == normalmap_drawable_id)
    {
@@ -1414,8 +1423,7 @@ static void glossmap_callback(gint32 id, gpointer data)
    gimp_pixel_rgn_init(&src_rgn, drawable, 0, 0, w, h, 0, 0);
    gimp_pixel_rgn_get_rect(&src_rgn, pixels, 0, 0, w, h);
    
-   if(!GLEW_ARB_texture_non_power_of_two &&
-      !(IS_POT(w) && IS_POT(h)))
+   if(!has_npot && !(IS_POT(w) && IS_POT(h)))
    {
       get_nearest_pot(w, h, &w_pot, &h_pot);
       tmp = g_malloc(h_pot * w_pot * bpp);
@@ -1929,8 +1937,7 @@ void update_3D_preview(unsigned int w, unsigned int h, int bpp,
    if(!_active) return;
    if(_gl_error) return;
    
-   if(!GLEW_ARB_texture_non_power_of_two &&
-      !(IS_POT(w) && IS_POT(h)))
+   if(!has_npot && !(IS_POT(w) && IS_POT(h)))
    {
       get_nearest_pot(w, h, &w_pot, &h_pot);
       pixels = g_malloc(h_pot * w_pot * bpp);
