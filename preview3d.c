@@ -618,12 +618,6 @@ static void init(GtkWidget *widget, gpointer data)
       _gl_error = 1;
    }
 
-   if(!GLEW_SGIS_generate_mipmap)
-   {
-      g_message("GL_SGIS_generate_mipmap is required for the 3D preview");
-      _gl_error = 1;
-   }
-   
    if(_gl_error) return;
    
    glGenTextures(1, &diffuse_tex);
@@ -1288,9 +1282,9 @@ static void get_nearest_pot(unsigned int w, unsigned int h,
 static void diffusemap_callback(gint32 id, gpointer data)
 {
    GimpDrawable *drawable;
-   int w, h, bpp;
+   int w, h, bpp, mipw, miph, n;
    int w_pot, h_pot;
-   unsigned char *pixels, *tmp;
+   unsigned char *pixels, *tmp, *mip;
    GimpPixelRgn src_rgn;
    GLenum type = 0;
    
@@ -1344,9 +1338,29 @@ static void diffusemap_callback(gint32 id, gpointer data)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
-   glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
+   if(GLEW_SGIS_generate_mipmap)
+      glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, type, w, h, 0,
                 type, GL_UNSIGNED_BYTE, pixels);
+
+   if(!GLEW_SGIS_generate_mipmap)
+   {
+      mipw = w;
+      miph = h;
+      n = 0;
+      while((mipw != 1) && (miph != 1))
+      {
+         if(mipw > 1) mipw >>= 1;
+         if(miph > 1) miph >>= 1;
+         ++n;
+         mip = g_malloc(mipw * miph * bpp);
+         scale_pixels(mip, mipw, miph, pixels, w, h, bpp);
+         glTexImage2D(GL_TEXTURE_2D, n, bpp, w, h, 0,
+                      (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
+                      mip);
+         g_free(mip);
+      }
+   }
    
    g_free(pixels);
    
@@ -1358,9 +1372,9 @@ static void diffusemap_callback(gint32 id, gpointer data)
 static void glossmap_callback(gint32 id, gpointer data)
 {
    GimpDrawable *drawable;
-   int w, h, bpp;
+   int w, h, bpp, mipw, miph, n;
    int w_pot, h_pot;
-   unsigned char *pixels, *tmp;
+   unsigned char *pixels, *tmp, *mip;
    GimpPixelRgn src_rgn;
    GLenum type = 0;
    
@@ -1414,9 +1428,29 @@ static void glossmap_callback(gint32 id, gpointer data)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
-   glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
+   if(GLEW_SGIS_generate_mipmap)
+      glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, type, w, h, 0,
                 type, GL_UNSIGNED_BYTE, pixels);
+   
+   if(!GLEW_SGIS_generate_mipmap)
+   {
+      mipw = w;
+      miph = h;
+      n = 0;
+      while((mipw != 1) && (miph != 1))
+      {
+         if(mipw > 1) mipw >>= 1;
+         if(miph > 1) miph >>= 1;
+         ++n;
+         mip = g_malloc(mipw * miph * bpp);
+         scale_pixels(mip, mipw, miph, pixels, w, h, bpp);
+         glTexImage2D(GL_TEXTURE_2D, n, bpp, w, h, 0,
+                      (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
+                      mip);
+         g_free(mip);
+      }
+   }
    
    g_free(pixels);
    
@@ -1882,8 +1916,9 @@ void destroy_3D_preview(void)
 void update_3D_preview(unsigned int w, unsigned int h, int bpp,
                        unsigned char *image)
 {
-   unsigned int w_pot, h_pot;
+   unsigned int w_pot, h_pot, mipw, miph, n;
    unsigned char *pixels = image;
+   unsigned char *mip;
    
    if(!_active) return;
    if(_gl_error) return;
@@ -1905,9 +1940,29 @@ void update_3D_preview(unsigned int w, unsigned int h, int bpp,
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
-   glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
+   if(GLEW_SGIS_generate_mipmap)
+      glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, bpp, w, h, 0,
                 (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, pixels);
+   
+   if(!GLEW_SGIS_generate_mipmap)
+   {
+      mipw = w;
+      miph = h;
+      n = 0;
+      while((mipw != 1) && (miph != 1))
+      {
+         if(mipw > 1) mipw >>= 1;
+         if(miph > 1) miph >>= 1;
+         ++n;
+         mip = g_malloc(mipw * miph * bpp);
+         scale_pixels(mip, mipw, miph, pixels, w, h, bpp);
+         glTexImage2D(GL_TEXTURE_2D, n, bpp, w, h, 0,
+                      (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
+                      mip);
+         g_free(mip);
+      }
+   }
    
    if(pixels != image)
       g_free(pixels);
