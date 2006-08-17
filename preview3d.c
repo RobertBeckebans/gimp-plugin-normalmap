@@ -110,6 +110,7 @@ static struct
 static const float anisotropy = 4.0f;
 
 static int has_glsl = 0;
+static int has_generate_mipmap = 0;
 
 static int max_instructions = 0;
 static int max_indirections = 0;
@@ -657,6 +658,7 @@ static void init(GtkWidget *widget, gpointer data)
 
    has_glsl = GLEW_ARB_shader_objects && GLEW_ARB_vertex_shader && 
       GLEW_ARB_fragment_shader;
+   has_generate_mipmap = GLEW_SGIS_generate_mipmap;
    
    if(has_glsl)
    {
@@ -1338,12 +1340,12 @@ static void diffusemap_callback(gint32 id, gpointer data)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
-   if(GLEW_SGIS_generate_mipmap)
+   if(has_generate_mipmap)
       glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, type, w, h, 0,
                 type, GL_UNSIGNED_BYTE, pixels);
 
-   if(!GLEW_SGIS_generate_mipmap)
+   if(!has_generate_mipmap)
    {
       mipw = w;
       miph = h;
@@ -1355,7 +1357,7 @@ static void diffusemap_callback(gint32 id, gpointer data)
          ++n;
          mip = g_malloc(mipw * miph * bpp);
          scale_pixels(mip, mipw, miph, pixels, w, h, bpp);
-         glTexImage2D(GL_TEXTURE_2D, n, bpp, w, h, 0,
+         glTexImage2D(GL_TEXTURE_2D, n, bpp, mipw, miph, 0,
                       (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
                       mip);
          g_free(mip);
@@ -1428,12 +1430,12 @@ static void glossmap_callback(gint32 id, gpointer data)
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
-   if(GLEW_SGIS_generate_mipmap)
+   if(has_generate_mipmap)
       glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, type, w, h, 0,
                 type, GL_UNSIGNED_BYTE, pixels);
    
-   if(!GLEW_SGIS_generate_mipmap)
+   if(!has_generate_mipmap)
    {
       mipw = w;
       miph = h;
@@ -1445,7 +1447,7 @@ static void glossmap_callback(gint32 id, gpointer data)
          ++n;
          mip = g_malloc(mipw * miph * bpp);
          scale_pixels(mip, mipw, miph, pixels, w, h, bpp);
-         glTexImage2D(GL_TEXTURE_2D, n, bpp, w, h, 0,
+         glTexImage2D(GL_TEXTURE_2D, n, bpp, mipw, miph, 0,
                       (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
                       mip);
          g_free(mip);
@@ -1940,12 +1942,12 @@ void update_3D_preview(unsigned int w, unsigned int h, int bpp,
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
-   if(GLEW_SGIS_generate_mipmap)
+   if(has_generate_mipmap)
       glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE);
    glTexImage2D(GL_TEXTURE_2D, 0, bpp, w, h, 0,
                 (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, pixels);
    
-   if(!GLEW_SGIS_generate_mipmap)
+   if(!has_generate_mipmap)
    {
       mipw = w;
       miph = h;
@@ -1957,7 +1959,7 @@ void update_3D_preview(unsigned int w, unsigned int h, int bpp,
          ++n;
          mip = g_malloc(mipw * miph * bpp);
          scale_pixels(mip, mipw, miph, pixels, w, h, bpp);
-         glTexImage2D(GL_TEXTURE_2D, n, bpp, w, h, 0,
+         glTexImage2D(GL_TEXTURE_2D, n, bpp, mipw, miph, 0,
                       (bpp == 4) ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
                       mip);
          g_free(mip);
