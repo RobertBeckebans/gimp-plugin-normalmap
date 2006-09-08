@@ -50,7 +50,8 @@ enum CONVERSION_TYPE
 {
    CONVERT_NONE = 0, CONVERT_BIASED_RGB, CONVERT_RED, CONVERT_GREEN, 
    CONVERT_BLUE, CONVERT_MAX_RGB, CONVERT_MIN_RGB, CONVERT_COLORSPACE,
-   CONVERT_NORMALIZE_ONLY, CONVERT_HEIGHTMAP, MAX_CONVERSION_TYPE
+   CONVERT_NORMALIZE_ONLY, CONVERT_DUDV_TO_NORMAL, CONVERT_HEIGHTMAP,
+   MAX_CONVERSION_TYPE
 };
 
 enum DUDV_TYPE
@@ -874,6 +875,7 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
    }
 
    if(nmapvals.conversion != CONVERT_NORMALIZE_ONLY &&
+      nmapvals.conversion != CONVERT_DUDV_TO_NORMAL &&
       nmapvals.conversion != CONVERT_HEIGHTMAP)
    {
       s = src;
@@ -959,6 +961,14 @@ static gint32 normalmap(GimpDrawable *drawable, gboolean preview_mode)
             n[0] = (((float)s[0] * oneover255) - 0.5f) * 2.0f;
             n[1] = (((float)s[1] * oneover255) - 0.5f) * 2.0f;
             n[2] = (((float)s[2] * oneover255) - 0.5f) * 2.0f;
+            n[0] *= nmapvals.scale;
+            n[1] *= nmapvals.scale;
+         }
+         else if(nmapvals.conversion == CONVERT_DUDV_TO_NORMAL)
+         {
+            n[0] = (((float)s[0] * oneover255) - 0.5f) * 2.0f;
+            n[1] = (((float)s[1] * oneover255) - 0.5f) * 2.0f;
+            n[2] = sqrtf(1.0f - (n[0] * n[0] - n[1] * n[1]));
             n[0] *= nmapvals.scale;
             n[1] *= nmapvals.scale;
          }
@@ -1624,6 +1634,12 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
                       GTK_SIGNAL_FUNC(conversion_selected), 
                       (gpointer)CONVERT_NORMALIZE_ONLY);
+   gtk_widget_show(menuitem);
+   gtk_menu_append(GTK_MENU(menu), menuitem);
+   menuitem = gtk_menu_item_new_with_label("DUDV to Normal");
+   gtk_signal_connect(GTK_OBJECT(menuitem), "activate", 
+                      GTK_SIGNAL_FUNC(conversion_selected), 
+                      (gpointer)CONVERT_DUDV_TO_NORMAL);
    gtk_widget_show(menuitem);
    gtk_menu_append(GTK_MENU(menu), menuitem);
    menuitem = gtk_menu_item_new_with_label("Convert to height");
