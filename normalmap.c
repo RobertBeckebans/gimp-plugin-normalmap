@@ -1147,9 +1147,9 @@ static gint idle_callback(gpointer data)
 
 static void filter_type_selected(GtkWidget *widget, gpointer data)
 {
-   if(nmapvals.filter != (gint)data)
+   if(nmapvals.filter != (gint)(long)data)
    {
-      nmapvals.filter = (gint)data;
+      nmapvals.filter = (gint)(long)data;
       update_preview = 1;
    }
 }
@@ -1170,9 +1170,9 @@ static void height_source_selected(GtkWidget *widget, gpointer data)
 {
    GtkWidget *opt;
    
-   if(nmapvals.height_source == (gint)data) return;
+   if(nmapvals.height_source == (gint)(long)data) return;
    
-   nmapvals.height_source = (gint)data;
+   nmapvals.height_source = (gint)(long)data;
    
    opt = g_object_get_data(G_OBJECT(widget), "conversion_opt");
    if(!nmapvals.height_source)
@@ -1191,9 +1191,9 @@ static void height_source_selected(GtkWidget *widget, gpointer data)
 
 static void alpha_result_selected(GtkWidget *widget, gpointer data)
 {
-   if(nmapvals.alpha != (gint)data)
+   if(nmapvals.alpha != (gint)(long)data)
    {
-      nmapvals.alpha = (gint)data;
+      nmapvals.alpha = (gint)(long)data;
       update_preview = 1;
    }
 }
@@ -1202,9 +1202,9 @@ static void conversion_selected(GtkWidget *widget, gpointer data)
 {
    GtkWidget *contrast_spin;
    
-   if(nmapvals.conversion != (gint)data)
+   if(nmapvals.conversion != (gint)(long)data)
    {
-      nmapvals.conversion = (gint)data;
+      nmapvals.conversion = (gint)(long)data;
       contrast_spin = g_object_get_data(G_OBJECT(widget), "contrast_spin");
       gtk_widget_set_sensitive(contrast_spin, nmapvals.conversion == CONVERT_HEIGHTMAP);
       update_preview = 1;
@@ -1227,9 +1227,9 @@ static void dudv_selected(GtkWidget *widget, gpointer data)
    GimpDrawable *drawable;
    GtkWidget *opt;
    
-   if(nmapvals.dudv == (gint)data) return;
+   if(nmapvals.dudv == (gint)(long)data) return;
    
-   nmapvals.dudv = (gint)data;
+   nmapvals.dudv = (gint)(long)data;
    
    drawable = g_object_get_data(G_OBJECT(widget), "drawable");
    opt = g_object_get_data(G_OBJECT(widget), "alpha_opt");
