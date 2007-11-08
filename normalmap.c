@@ -1328,7 +1328,7 @@ static gint normalmap_dialog(GimpDrawable *drawable)
                             0, 0, gimp_standard_help_func, 0,
                             GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
                             GTK_STOCK_OK, GTK_RESPONSE_OK,
-                            0);
+                            NULL);
 
    gtk_signal_connect(GTK_OBJECT(dialog), "response",
                       GTK_SIGNAL_FUNC(normalmap_dialog_response),
