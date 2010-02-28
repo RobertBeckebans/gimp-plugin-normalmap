@@ -19,72 +19,80 @@
 	Boston, MA 02111-1307, USA.
 */
 
-#define LERP(a,b,c) ((a) + ((b) - (a)) * (c))
-
-float cubic_interpolate(float a, float b, float c, float d, float x)
-{
-   float v0, v1, v2, v3, x2;
-   
-   x2 = x * x;
-   v0 = d - c - a + b;
-   v1 = a - b - v0;
-   v2 = c - a;
-   v3 = b;
-   
-   return(v0 * x * x2 + v1 * x2 + v2 * x + v3);
-}
+#include "scale.h"
 
 void scale_pixels(unsigned char *dst, int dw, int dh,
                   unsigned char *src, int sw, int sh,
                   int bpp)
 {
-   int n, x, y;
-   int ix, iy;
-   float fx, fy;
-   float dx, dy, val;
-   float r0, r1, r2, r3;
-   int srowbytes = sw * bpp;
-   int drowbytes = dw * bpp;
+   int x, y, n, ix, iy, wx, wy, v;
+   int a, b, c, d;
+   int dstride = dw * bpp;
+   unsigned char *s;
    
-#define VAL(x, y, c) \
-   (float)src[((y) < 0 ? 0 : (y) >= sh ? sh - 1 : (y)) * srowbytes + \
-              (((x) < 0 ? 0 : (x) >= sw ? sw - 1 : (x)) * bpp) + c]
-      
    for(y = 0; y < dh; ++y)
    {
-      fy = ((float)y / (float)dh) * (float)sh;
-      iy = (int)fy;
-      dy = fy - (float)iy;
+      if(dh > 1)
+      {
+         iy = (((sh - 1) * y) << 7) / (dh - 1);
+         if(y == dh - 1) --iy;
+         wy = iy & 0x7f;
+         iy >>= 7;
+      }
+      else
+         iy = wy = 0;
+      
       for(x = 0; x < dw; ++x)
       {
-         fx = ((float)x / (float)dw) * (float)sw;
-         ix = (int)fx;
-         dx = fx - (float)ix;
+         if(dw > 1)
+         {
+            ix = (((sw - 1) * x) << 7) / (dw - 1);
+            if(x == dw - 1) --ix;
+            wx = ix & 0x7f;
+            ix >>= 7;
+         }
+         else
+            ix = wx = 0;
+         
+         s = src + ((iy - 1) * sw + (ix - 1)) * bpp;
          
          for(n = 0; n < bpp; ++n)
          {
-            r0 = cubic_interpolate(VAL(ix - 1, iy - 1, n),
-                                   VAL(ix,     iy - 1, n),
-                                   VAL(ix + 1, iy - 1, n),
-                                   VAL(ix + 2, iy - 1, n), dx);
-            r1 = cubic_interpolate(VAL(ix - 1, iy,     n),
-                                   VAL(ix,     iy,     n),
-                                   VAL(ix + 1, iy,     n),
-                                   VAL(ix + 2, iy,     n), dx);
-            r2 = cubic_interpolate(VAL(ix - 1, iy + 1, n),
-                                   VAL(ix,     iy + 1, n),
-                                   VAL(ix + 1, iy + 1, n),
-                                   VAL(ix + 2, iy + 1, n), dx);
-            r3 = cubic_interpolate(VAL(ix - 1, iy + 2, n),
-                                   VAL(ix,     iy + 2, n),
-                                   VAL(ix + 1, iy + 2, n),
-                                   VAL(ix + 2, iy + 2, n), dx);
-            val = cubic_interpolate(r0, r1, r2, r3, dy);
-            if(val <   0) val = 0;
-            if(val > 255) val = 255;
-            dst[y * drowbytes + (x * bpp) + n] = (unsigned char)val;
+            b = icerp(s[(sw + 0) * bpp],
+                      s[(sw + 1) * bpp],
+                      s[(sw + 2) * bpp],
+                      s[(sw + 3) * bpp], wx);
+            if(iy > 0)
+            {
+               a = icerp(s[      0],
+                         s[    bpp],
+                         s[2 * bpp],
+                         s[3 * bpp], wx);
+            }
+            else
+               a = b;
+            
+            c = icerp(s[(2 * sw + 0) * bpp],
+                      s[(2 * sw + 1) * bpp],
+                      s[(2 * sw + 2) * bpp],
+                      s[(2 * sw + 3) * bpp], wx);
+            if(iy < dh - 1)
+            {
+               d = icerp(s[(3 * sw + 0) * bpp],
+                         s[(3 * sw + 1) * bpp],
+                         s[(3 * sw + 2) * bpp],
+                         s[(3 * sw + 3) * bpp], wx);
+            }
+            else
+               d = c;
+            
+            v = icerp(a, b, c, d, wy);
+            if(v < 0) v = 0;
+            if(v > 255) v = 255;
+            dst[(y * dstride) + (x * bpp) + n] = v;
+            ++s;
          }
       }
    }
-#undef VAL   
 }
+
