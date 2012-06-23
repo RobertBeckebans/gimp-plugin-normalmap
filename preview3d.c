@@ -1474,13 +1474,13 @@ static void glossmap_callback(gint32 id, gpointer data)
 
 static void object_selected(GtkWidget *widget, gpointer data)
 {
-   object_type = (int)(long)data;
+   object_type = (int)((size_t)data);
    gtk_widget_queue_draw(glarea);
 }
 
 static void bumpmapping_clicked(GtkWidget *widget, gpointer data)
 {
-   bumpmapping = (int)(long)data;
+   bumpmapping = (int)((size_t)data);
    gtk_widget_queue_draw(glarea);
 }
 
@@ -1527,12 +1527,12 @@ static void color_changed(GtkWidget *widget, gpointer data)
 static void rotate_type_toggled(GtkWidget *widget, gpointer data)
 {
    if(gtk_toggle_tool_button_get_active(GTK_TOGGLE_TOOL_BUTTON(widget)))
-      rotate_type = (int)(long)data;
+      rotate_type = (int)((size_t)data);
 }
 
 static void uvscale_changed(GtkWidget *widget, gpointer data)
 {
-   int n = (int)(long)data;
+   int n = (int)((size_t)data);
    float v = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
    GtkWidget *btn = g_object_get_data(G_OBJECT(widget), "chain");
 
@@ -1750,7 +1750,7 @@ void show_3D_preview(GimpDrawable *drawable)
       menuitem = gtk_menu_item_new_with_label(object_strings[i]);
       gtk_signal_connect(GTK_OBJECT(menuitem), "activate",
                          GTK_SIGNAL_FUNC(object_selected),
-                         (gpointer)(long)i);
+                         (gpointer)((size_t)i));
       gtk_widget_show(menuitem);
       gtk_menu_append(GTK_MENU(menu), menuitem);
    }
@@ -1814,7 +1814,7 @@ void show_3D_preview(GimpDrawable *drawable)
       menuitem = gtk_menu_item_new_with_label(bumpmap_strings[i]);
       gtk_signal_connect(GTK_OBJECT(menuitem), "activate",
                          GTK_SIGNAL_FUNC(bumpmapping_clicked),
-                         (gpointer)(long)i);
+                         (gpointer)((size_t)i));
       gtk_widget_show(menuitem);
       gtk_menu_append(GTK_MENU(menu), menuitem);
    }
