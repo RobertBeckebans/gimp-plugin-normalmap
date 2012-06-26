@@ -1,6 +1,6 @@
 
 OS=$(shell uname -s)
-ifeq ($(OS), Linux)
+ifeq (,$(findstring Windows,$(OS)))
 include Makefile.linux
 else
 include Makefile.win32
