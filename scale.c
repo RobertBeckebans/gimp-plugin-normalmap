@@ -1,7 +1,7 @@
 /*
 	normalmap GIMP plugin
 
-	Copyright (C) 2002-2008 Shawn Kirst <skirst@insightbb.com>
+	Copyright (C) 2002-2012 Shawn Kirst <skirst@gmail.com>
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public
@@ -29,7 +29,7 @@ void scale_pixels(unsigned char *dst, int dw, int dh,
    int a, b, c, d;
    int dstride = dw * bpp;
    unsigned char *s;
-   
+
    for(y = 0; y < dh; ++y)
    {
       if(dh > 1)
@@ -41,7 +41,7 @@ void scale_pixels(unsigned char *dst, int dw, int dh,
       }
       else
          iy = wy = 0;
-      
+
       for(x = 0; x < dw; ++x)
       {
          if(dw > 1)
@@ -53,9 +53,9 @@ void scale_pixels(unsigned char *dst, int dw, int dh,
          }
          else
             ix = wx = 0;
-         
+
          s = src + ((iy - 1) * sw + (ix - 1)) * bpp;
-         
+
          for(n = 0; n < bpp; ++n)
          {
             b = icerp(s[(sw + 0) * bpp],
@@ -71,7 +71,7 @@ void scale_pixels(unsigned char *dst, int dw, int dh,
             }
             else
                a = b;
-            
+
             c = icerp(s[(2 * sw + 0) * bpp],
                       s[(2 * sw + 1) * bpp],
                       s[(2 * sw + 2) * bpp],
@@ -85,7 +85,7 @@ void scale_pixels(unsigned char *dst, int dw, int dh,
             }
             else
                d = c;
-            
+
             v = icerp(a, b, c, d, wy);
             if(v < 0) v = 0;
             if(v > 255) v = 255;
