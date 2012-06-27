@@ -199,7 +199,9 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
             nmapvals.yinvert = param[12].data.d_int32;
             nmapvals.swapRGB = param[13].data.d_int32;
             nmapvals.contrast = param[14].data.d_float;
-            nmapvals.alphamap_id = gimp_drawable_get(param[15].data.d_drawable)->drawable_id;
+            nmapvals.alphamap_id = param[15].data.d_int32;
+            if(nmapvals.alphamap_id != 0)
+               nmapvals.alphamap_id = gimp_drawable_get(param[15].data.d_drawable)->drawable_id;
          }
          break;
       case GIMP_RUN_WITH_LAST_VALS:
@@ -213,6 +215,8 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
 
    if(normalmap(drawable,FALSE) == -1)
       status = GIMP_PDB_EXECUTION_ERROR;
+
+   gimp_progress_end();
 
    if(run_mode != GIMP_RUN_NONINTERACTIVE)
       gimp_displays_flush();
