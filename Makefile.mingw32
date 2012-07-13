@@ -1,5 +1,5 @@
 
-GIMPTOOL=/usr/i686-w64-mingw32/sys-root/mingw/bin/gimptool-2.0
+GIMPTOOL=/usr/i686-w64-mingw32/sys-root/mingw/bin/gimptool-2.0.exe
 
 CC=i686-w64-mingw32-gcc
 CFLAGS=-O3 -Wall `i686-w64-mingw32-pkg-config --cflags gtk+-2.0 gtkglext-1.0 gimp-2.0 glew`
