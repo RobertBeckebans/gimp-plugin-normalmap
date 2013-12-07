@@ -230,10 +230,19 @@ static void run(const gchar *name, gint nparams, const GimpParam *param,
 }
 
 #ifndef min
-#define min(a,b)  ((a)<(b) ? (a) : (b))
+# ifdef __GNUC__
+#  define min(a,b)  ({typeof(a) _a = (a); typeof(b) _b = (b); _a < _b ? _a : _b;})
+# else
+#  define min(a,b)  ((a)<(b) ? (a) : (b))
+# endif
 #endif
+
 #ifndef max
-#define max(a,b)  ((a)>(b) ? (a) : (b))
+# ifdef __GNUC__
+#  define max(a,b)  ({typeof(a) _a = (a); typeof(b) _b = (b); _a > _b ? _a : _b;})
+# else
+#  define max(a,b)  ((a)>(b) ? (a) : (b))
+# endif
 #endif
 
 #define SQR(x)      ((x) * (x))
