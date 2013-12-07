@@ -114,6 +114,7 @@ gint runme = 0;
 
 static GtkWidget *dialog;
 static GtkWidget *preview;
+static GtkWidget *btn3DP;
 
 MAIN()
 
@@ -1241,6 +1242,7 @@ static void conversion_selected(GtkWidget *widget, gpointer data)
       nmapvals.conversion = (gint)((size_t)data);
       contrast_spin = g_object_get_data(G_OBJECT(widget), "contrast_spin");
       gtk_widget_set_sensitive(contrast_spin, nmapvals.conversion == CONVERT_HEIGHTMAP);
+      gtk_widget_set_sensitive(btn3DP, nmapvals.conversion != CONVERT_HEIGHTMAP);
       update_preview = 1;
    }
 }
@@ -1406,6 +1408,10 @@ static gint normalmap_dialog(GimpDrawable *drawable)
    g_object_set_data(G_OBJECT(btn), "drawable", drawable);
    gtk_box_pack_start(GTK_BOX(vbox), btn, 0, 0, 0);
    gtk_widget_show(btn);
+   
+   gtk_widget_set_sensitive(btn, nmapvals.conversion != CONVERT_HEIGHTMAP);
+   
+   btn3DP = btn;
 
    label = gtk_label_new("Alpha map:");
    gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
